@@ -7,8 +7,9 @@ ESP32-S3 platform in ESP-IDF / FreeRTOS / C++. It replicates MicroJS8's screen
 ring, protocol grammar, and operating ergonomics on a pocket-sized device with
 a built-in keyboard and display.
 
-**Status: Phase 0 — boot diagnostic.** This release boots, mounts the SD
-card, and displays a splash screen. No radio, no decoder, no UI. See
+**Status: Phase 1 — SETUP screen.** Boots through a brief splash, mounts the SD
+card, loads persistent configuration from NVS, and presents an editable SETUP
+screen (CALL / GRID / RADIO). No radio, no decoder, full UI ring not yet wired. See
 [Build Specification §11](docs/) for the phased delivery plan.
 
 **License: GPL-3.0.** Inherits from gfsk8-modem-clean (jfrancis42) and
@@ -63,6 +64,33 @@ idf.py -p COM11 flash monitor
 Replace `COM11` with the actual COM port shown in Device Manager.
 
 To exit `monitor`: `Ctrl+]`.
+
+---
+
+## Definition of Done — Phase 1
+
+After flash and one power cycle, the Cardputer ADV should:
+
+1. Show the Phase 0 splash briefly (~1.2 s), then transition to the **SETUP** screen.
+2. SETUP shows three fields: `CALL`, `GRID`, `RADIO`. The first is focused.
+3. **Tab** moves focus through the fields in order, wrapping at the end.
+4. **Enter** on a focused field enters EDIT mode.
+   - Text fields (CALL, GRID): type to append, Backspace to delete, Enter to commit, Fn+\` to cancel.
+   - Menu field (RADIO): Fn+`;` / Fn+`.` cycle options, Enter to commit, Fn+\` to cancel.
+5. **Ctrl+S** at any time saves all fields to NVS. A green "Saved" banner appears for ~1.5 s.
+6. Committing a field with an invalid value (e.g. callsign with `?`) shows a red "Invalid value" banner; the field stays in edit mode until the operator fixes it or presses Esc.
+7. **Power cycle** the device — the saved values are still there.
+8. On first boot with empty NVS, the defaults are `NOCALL` / `AA00` / `qdx`. The serial log warns that the placeholder callsign needs replacing.
+
+### Key bindings (mirrors MicroJS8)
+
+| Action | Key |
+|---|---|
+| Next field | Tab |
+| Enter / exit edit mode | Enter / Fn+\` (Esc) |
+| Cycle menu options | Fn+`;` (up) / Fn+`.` (down) |
+| Save all | Ctrl+S |
+| Previous / next screen (Phase 2+) | Fn+`,` / Fn+`/` |
 
 ---
 
