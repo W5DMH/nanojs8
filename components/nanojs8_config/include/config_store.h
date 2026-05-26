@@ -29,8 +29,10 @@ namespace config {
 // is not an error.
 //
 // Migration: if the on-disk version differs from NANOJS8_CONFIG_VERSION,
-// load() performs the migration (Phase 1 has no migrations to perform,
-// so a mismatched version triggers a default-and-rewrite).
+// load() performs the migration. Phase 2 supports v1 → v2 migration
+// (preserves callsign/grid/radio, defaults groups to ""). Any other
+// version mismatch (future schema, corrupted) falls back to a
+// default-and-rewrite.
 //
 // Must be called exactly once before any get_*() / set_*() / save().
 esp_err_t load();
@@ -50,16 +52,22 @@ const Config& current();
 // SETUP screen uses the return value to gate Tab-out and surface a
 // brief inline error.
 //
-// Validation rules (Phase 1):
-//   - callsign: 3..15 chars, ASCII alphanumeric plus '/' allowed.
+// Validation rules:
+//   - callsign: 3..15 chars, ASCII alphanumeric plus '/' allowed,
+//               must contain at least one digit.
 //   - grid:     exactly 4 or 6 chars, Maidenhead format
 //               (A-R, A-R, 0-9, 0-9, [a-x, a-x]).
 //   - radio:    must be one of NANOJS8_RADIO_PROFILES[].
+//   - groups:   empty OR comma-separated list of up to NANOJS8_MAX_GROUPS
+//               entries, each "@" + 1..9 uppercase alphanumerics.
+//               @ALLCALL and @HB are rejected (implicit at protocol
+//               layer, would be redundant).
 //
 // All setters NUL-terminate; the caller's string need not be.
 esp_err_t set_callsign(const char* value);
 esp_err_t set_grid    (const char* value);
 esp_err_t set_radio   (const char* value);
+esp_err_t set_groups  (const char* value);
 
 // Validation helpers — exposed so the SETUP screen can re-check a draft
 // value at character-insertion time (live red-highlight as the user
@@ -67,9 +75,11 @@ esp_err_t set_radio   (const char* value);
 bool valid_callsign(const char* value);
 bool valid_grid    (const char* value);
 bool valid_radio   (const char* value);
+bool valid_groups  (const char* value);
 
 // Convenience: dump the current config to ESP_LOG at INFO level. Used
-// by main() at boot and (later) by the DOCTOR screen.
+// by main() at boot. Debugging from the serial monitor is the primary
+// way to inspect config state at runtime.
 void log_current();
 
 // Convenience: is the current callsign the first-boot placeholder?

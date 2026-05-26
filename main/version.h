@@ -15,8 +15,8 @@
 
 #pragma once
 
-#define NANOJS8_VERSION       "0.1.0"
-#define NANOJS8_VERSION_PHASE "Phase 1 - SETUP screen"
+#define NANOJS8_VERSION       "0.2.0"
+#define NANOJS8_VERSION_PHASE "Phase 2 - 7 screens"
 
 #define NANOJS8_BUILD_DATE __DATE__
 #define NANOJS8_BUILD_TIME __TIME__

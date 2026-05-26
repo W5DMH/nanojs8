@@ -1,13 +1,24 @@
-// NanoJS8 — Screen router implementation.
+// NanoJS8 — Screen router implementation (Phase 2).
+//
+// Owns one instance of each ScreenId, holds them in a fixed array, and
+// dispatches events to the active one. Bare `,` `/` chars become
+// LEFT/RIGHT ring-nav events UNLESS the active screen reports it is
+// editing a text field, in which case the chars pass through to the
+// screen as typed input. Same translation applies to bare `;` `.`
+// (UP/DOWN) but those are reserved for screen-internal scrolling in
+// later phases.
 
 #include "screen_router.h"
 
+#include <array>
 #include <memory>
 
 #include "esp_log.h"
 #include <M5Cardputer.h>
 
 #include "input_translator.h"
+#include "screens/home_screen.h"
+#include "screens/placeholder_screen.h"
 #include "screens/setup_screen.h"
 
 namespace nanojs8 {
@@ -15,43 +26,173 @@ namespace ui {
 
 static const char* TAG = "router";
 
-// The active screen. unique_ptr so screens self-clean on swap.
-//
-// Phase 1 only ever holds a SetupScreen. Phase 2 will instantiate one
-// screen per ScreenId and switch the pointer on LEFT/RIGHT events. For
-// now we keep it simple — one screen, no switching machinery yet.
-static std::unique_ptr<IScreen> s_active;
+// Registry: one unique_ptr per ScreenId, indexed by enum value.
+// Sized to ScreenId::COUNT so iterating is straightforward.
+static std::array<std::unique_ptr<IScreen>, (size_t)ScreenId::COUNT> s_screens;
+
+// Currently-active screen identity. Defaults to HOME; main() calls
+// router_set_screen() before the first tick to choose the actual
+// starting screen based on operator config state.
+static ScreenId s_active_id = ScreenId::HOME;
 
 // Event buffer for one tick. The translator drains state.word which can
 // hold multiple chars typed between polls; 8 is plenty of headroom for
 // a 20 Hz tick rate with a human typing.
 static constexpr size_t EVENT_BUF_SIZE = 8;
 
+// Helper to get the active screen pointer (or nullptr if the registry
+// hasn't been populated yet).
+static IScreen* active_screen() {
+    const size_t idx = (size_t)s_active_id;
+    if (idx >= s_screens.size()) {
+        return nullptr;
+    }
+    return s_screens[idx].get();
+}
+
+// Translate a bare-char nav event into the corresponding key when
+// appropriate. Returns the translated event, or the original event
+// unchanged if no translation applies.
+//
+// Translation rules:
+//   - Only typed chars (ev.ch != 0) are candidates.
+//   - The active screen must NOT be editing a text field.
+//   - `,` → LEFT (prev screen), `/` → RIGHT (next screen)
+//   - `;` → UP, `.` → DOWN (reserved for screen-internal scrolling
+//     in Phases 4+; in Phase 2 they're dispatched as UP/DOWN events
+//     which screens currently ignore).
+static InputEvent translate_bare_arrow(const InputEvent& ev) {
+    if (ev.ch == 0) {
+        return ev;
+    }
+    IScreen* screen = active_screen();
+    if (screen && screen->is_editing_text()) {
+        return ev;  // pass through as typed char
+    }
+    switch (ev.ch) {
+        case ',': return ev_key(Key::LEFT);
+        case '/': return ev_key(Key::RIGHT);
+        case ';': return ev_key(Key::UP);
+        case '.': return ev_key(Key::DOWN);
+        default:  return ev;
+    }
+}
+
+// Switch to a new screen, calling on_leave/on_enter and forcing a
+// repaint. Safe to call with the current screen as target (no-op).
+static void switch_to(ScreenId target) {
+    if (target == s_active_id) {
+        return;
+    }
+    const size_t idx = (size_t)target;
+    if (idx >= s_screens.size() || !s_screens[idx]) {
+        ESP_LOGW(TAG, "switch_to: ScreenId %d not registered, staying put",
+                 (int)target);
+        return;
+    }
+    IScreen* old_screen = active_screen();
+    if (old_screen) {
+        old_screen->on_leave();
+    }
+    s_active_id = target;
+    IScreen* new_screen = active_screen();
+    new_screen->on_enter();
+    new_screen->render();
+    // Reset the input translator so any modifier keys held during the
+    // switch don't trigger stale events on the new screen.
+    reset();
+}
+
+// Cycle the active screen forward (RIGHT) or backward (LEFT). Wraps
+// at both ends (matches MicroJS8).
+static void cycle_screen(bool forward) {
+    const size_t count = (size_t)ScreenId::COUNT;
+    size_t idx = (size_t)s_active_id;
+    if (forward) {
+        idx = (idx + 1) % count;
+    } else {
+        idx = (idx == 0) ? (count - 1) : (idx - 1);
+    }
+    ScreenId target = (ScreenId)idx;
+    ESP_LOGI(TAG, "Ring nav: %s → ScreenId %d",
+             forward ? "RIGHT" : "LEFT", (int)target);
+    switch_to(target);
+}
+
 void router_init() {
-    ESP_LOGI(TAG, "Router init — instantiating SETUP screen");
-    s_active = std::unique_ptr<IScreen>(new screens::SetupScreen());
-    s_active->on_enter();
-    s_active->render();
+    ESP_LOGI(TAG, "Router init — instantiating 7 screens");
+
+    // HOME — real content (read from NVS).
+    s_screens[(size_t)ScreenId::HOME] =
+        std::unique_ptr<IScreen>(new screens::HomeScreen());
+
+    // Five placeholders for the screens that get real implementations
+    // in Phases 4-6. Each is given its ScreenId, header text, and a
+    // short note explaining when it'll be filled in.
+    s_screens[(size_t)ScreenId::HEARD] = std::unique_ptr<IScreen>(
+        new screens::PlaceholderScreen(
+            ScreenId::HEARD, "HEARD",
+            "Phase 4 - audio decode pending"));
+
+    s_screens[(size_t)ScreenId::DIRECTED] = std::unique_ptr<IScreen>(
+        new screens::PlaceholderScreen(
+            ScreenId::DIRECTED, "DIRECTED",
+            "Phase 4 - decode activity log pending"));
+
+    s_screens[(size_t)ScreenId::INBOX] = std::unique_ptr<IScreen>(
+        new screens::PlaceholderScreen(
+            ScreenId::INBOX, "INBOX",
+            "Phase 6 - mailbox pending"));
+
+    s_screens[(size_t)ScreenId::COMPOSE] = std::unique_ptr<IScreen>(
+        new screens::PlaceholderScreen(
+            ScreenId::COMPOSE, "COMPOSE",
+            "Phase 5 - TX compose pending"));
+
+    s_screens[(size_t)ScreenId::ALLCALL] = std::unique_ptr<IScreen>(
+        new screens::PlaceholderScreen(
+            ScreenId::ALLCALL, "ALLCALL",
+            "Phase 5 - heartbeat broadcast pending"));
+
+    // SETUP — full Phase 1 implementation.
+    s_screens[(size_t)ScreenId::SETUP] =
+        std::unique_ptr<IScreen>(new screens::SetupScreen());
+
+    // Don't activate any screen yet — main() picks HOME or SETUP via
+    // router_set_screen() based on whether callsign is configured.
+}
+
+void router_set_screen(ScreenId initial) {
+    const size_t idx = (size_t)initial;
+    if (idx >= s_screens.size() || !s_screens[idx]) {
+        ESP_LOGE(TAG, "router_set_screen: ScreenId %d invalid, defaulting to HOME",
+                 (int)initial);
+        s_active_id = ScreenId::HOME;
+    } else {
+        s_active_id = initial;
+    }
+    IScreen* screen = active_screen();
+    if (screen) {
+        screen->on_enter();
+        screen->render();
+        ESP_LOGI(TAG, "Active screen: ScreenId %d", (int)s_active_id);
+    }
 }
 
 void router_redraw() {
-    if (s_active) {
-        s_active->render();
+    IScreen* screen = active_screen();
+    if (screen) {
+        screen->render();
     }
 }
 
 void router_go_to(ScreenId target) {
-    // Phase 1 only has SETUP. Log and stay put for any other request.
-    if (target == ScreenId::SETUP) {
-        ESP_LOGD(TAG, "router_go_to: SETUP (no-op, already active)");
-        return;
-    }
-    ESP_LOGW(TAG, "router_go_to: ScreenId %d not implemented in Phase 1",
-             (int)target);
+    switch_to(target);
 }
 
 void router_tick() {
-    if (!s_active) {
+    IScreen* screen = active_screen();
+    if (!screen) {
         return;
     }
 
@@ -59,35 +200,40 @@ void router_tick() {
     InputEvent events[EVENT_BUF_SIZE];
     const size_t n = poll(events, EVENT_BUF_SIZE);
 
-    // Dispatch each event to the active screen. If the screen doesn't
-    // consume it (handle_event returned false), the router considers it
-    // for global handling.
+    // Dispatch each event. Bare-arrow chars are translated to
+    // LEFT/RIGHT/UP/DOWN keys when the screen isn't editing text.
     for (size_t i = 0; i < n; ++i) {
-        const InputEvent& ev = events[i];
+        InputEvent ev = translate_bare_arrow(events[i]);
 
-        // Log key events (not typed chars — that would be noisy when the
-        // user is editing a field).
+        // Log key events at DEBUG (typed chars stay quiet to avoid
+        // noise during text editing).
         if (ev.key != Key::NONE) {
             ESP_LOGD(TAG, "key %s", key_name(ev.key));
         }
 
-        const bool consumed = s_active->handle_event(ev);
+        const bool consumed = screen->handle_event(ev);
         if (consumed) {
             continue;
         }
 
-        // Unconsumed. Global handlers:
-        if (ev.key == Key::LEFT || ev.key == Key::RIGHT) {
-            ESP_LOGI(TAG, "Screen-ring nav (%s) not populated yet in Phase 1",
-                     key_name(ev.key));
+        // Screen didn't consume — global handling:
+        if (ev.key == Key::LEFT) {
+            cycle_screen(false);
+        } else if (ev.key == Key::RIGHT) {
+            cycle_screen(true);
+        } else if (ev.key == Key::UP || ev.key == Key::DOWN) {
+            // No global UP/DOWN handler in Phase 2. Screens that care
+            // (HEARD/DIRECTED/INBOX in Phase 4+) handle these for row
+            // scrolling. Silent drop here.
         }
-        // Other unconsumed events: silently ignore. We don't want stray
-        // typed chars to log noise when a screen happens to be in a
-        // mode that doesn't care.
+        // Other unconsumed events: silent.
     }
 
     // Repaint after dispatching (screens self-suppress redundant draws).
-    s_active->render();
+    screen = active_screen();  // refresh; switch_to may have changed it
+    if (screen) {
+        screen->render();
+    }
 }
 
 } // namespace ui

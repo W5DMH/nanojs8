@@ -45,9 +45,10 @@ namespace layout {
 
 // Field labels — exactly as confirmed by the operator.
 static const char* FIELD_LABELS[] = {
-    "CALL ",
-    "GRID ",
-    "RADIO",
+    "CALL  ",
+    "GRID  ",
+    "RADIO ",
+    "GROUPS",
 };
 
 // Pull current millis (no overflow concern over our use window).
@@ -55,22 +56,31 @@ static uint32_t now_ms() {
     return (uint32_t)(esp_timer_get_time() / 1000);
 }
 
-// Per-field max length (for edit_buf_ overflow protection).
-static uint8_t field_max_len(SetupScreen::Field /*f*/) {
-    // All current fields fit within edit_buf_'s 20-byte capacity. We
-    // use the per-field constants for typing-side enforcement to give
-    // immediate feedback (no more chars accepted once at max).
-    return 19;  // 19 + NUL = 20 = edit_buf_ size
+// Per-field max length (for edit_buf_ overflow protection at typing
+// time — once the operator has typed this many chars, additional
+// keystrokes are dropped silently. The validator's bounds are the
+// authoritative check at commit time; this is just to give immediate
+// "no more room" feedback.)
+static uint8_t field_max_len(SetupScreen::Field f) {
+    switch (f) {
+        case SetupScreen::Field::CALL:   return NANOJS8_CALLSIGN_MAXLEN - 1;
+        case SetupScreen::Field::GRID:   return NANOJS8_GRID_MAXLEN     - 1;
+        case SetupScreen::Field::RADIO:  return NANOJS8_RADIO_MAXLEN    - 1;
+        case SetupScreen::Field::GROUPS: return NANOJS8_GROUPS_MAXLEN   - 1;
+        case SetupScreen::Field::COUNT:  break;
+    }
+    return 19;
 }
 
 // Get the currently-committed value for a field, as a const string.
 static const char* committed_value(SetupScreen::Field f) {
     const Config& cfg = nanojs8::config::current();
     switch (f) {
-        case SetupScreen::Field::CALL:  return cfg.callsign;
-        case SetupScreen::Field::GRID:  return cfg.grid;
-        case SetupScreen::Field::RADIO: return cfg.radio;
-        case SetupScreen::Field::COUNT: break;
+        case SetupScreen::Field::CALL:   return cfg.callsign;
+        case SetupScreen::Field::GRID:   return cfg.grid;
+        case SetupScreen::Field::RADIO:  return cfg.radio;
+        case SetupScreen::Field::GROUPS: return cfg.groups;
+        case SetupScreen::Field::COUNT:  break;
     }
     return "";
 }
@@ -80,10 +90,11 @@ static const char* committed_value(SetupScreen::Field f) {
 static bool try_commit_field(SetupScreen::Field f, const char* draft) {
     using namespace nanojs8::config;
     switch (f) {
-        case SetupScreen::Field::CALL:  return set_callsign(draft) == ESP_OK;
-        case SetupScreen::Field::GRID:  return set_grid(draft)     == ESP_OK;
-        case SetupScreen::Field::RADIO: return set_radio(draft)    == ESP_OK;
-        case SetupScreen::Field::COUNT: break;
+        case SetupScreen::Field::CALL:   return set_callsign(draft) == ESP_OK;
+        case SetupScreen::Field::GRID:   return set_grid(draft)     == ESP_OK;
+        case SetupScreen::Field::RADIO:  return set_radio(draft)    == ESP_OK;
+        case SetupScreen::Field::GROUPS: return set_groups(draft)   == ESP_OK;
+        case SetupScreen::Field::COUNT:  break;
     }
     return false;
 }
@@ -114,6 +125,16 @@ void SetupScreen::on_enter() {
     show_saved_ = false;
     needs_full_redraw_ = true;
     ESP_LOGI(TAG, "SETUP screen entered");
+}
+
+bool SetupScreen::is_editing_text() const {
+    // Only suppress ring-nav arrows when actively editing a *text*
+    // field. NAV mode allows ring nav freely; menu-field edit mode
+    // (RADIO) lets the router translate bare `;`/`.` to UP/DOWN
+    // (which would otherwise have been typeable chars). Only text-
+    // field edit (CALL, GRID, GROUPS) needs the `,` `/` chars to
+    // pass through as typed input.
+    return mode_ == Mode::EDIT && !field_is_menu(focus_);
 }
 
 // -------------------------------------------------------------------------

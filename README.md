@@ -7,9 +7,11 @@ ESP32-S3 platform in ESP-IDF / FreeRTOS / C++. It replicates MicroJS8's screen
 ring, protocol grammar, and operating ergonomics on a pocket-sized device with
 a built-in keyboard and display.
 
-**Status: Phase 1 — SETUP screen.** Boots through a brief splash, mounts the SD
-card, loads persistent configuration from NVS, and presents an editable SETUP
-screen (CALL / GRID / RADIO). No radio, no decoder, full UI ring not yet wired. See
+**Status: Phase 2 - 7 screens.** Boots into a 7-screen ring matching MicroJS8's UI:
+HOME / HEARD / DIRECTED / INBOX / COMPOSE / ALLCALL / SETUP. HOME shows the
+current operator identity (CALL, GRID) plus placeholders for GPS / FREQ / CAT /
+INBOX status. SETUP is fully editable with CALL, GRID, RADIO, GROUPS. Ring is
+navigated with bare left arrow (`,`) and right arrow (`/`); both wrap. See
 [Build Specification §11](docs/) for the phased delivery plan.
 
 **License: GPL-3.0.** Inherits from gfsk8-modem-clean (jfrancis42) and

@@ -49,12 +49,19 @@ public:
     bool handle_event(const InputEvent& ev) override;
     void render() override;
 
+    // Tells the router that bare `,` `/` `;` `.` should be typed chars
+    // (NOT screen-ring nav) when we're in EDIT on a text field. Returns
+    // false in NAV mode and in menu-field EDIT, so ring nav still works
+    // from the SETUP screen when not actively typing.
+    bool is_editing_text() const override;
+
 public:
     // Field identity. Order here is Tab cycle order on the screen.
     enum class Field : uint8_t {
-        CALL  = 0,
-        GRID  = 1,
-        RADIO = 2,
+        CALL   = 0,
+        GRID   = 1,
+        RADIO  = 2,
+        GROUPS = 3,
         COUNT
     };
 
@@ -68,7 +75,7 @@ public:
     Field    focus_;         // currently focused field
     Mode     mode_;          // NAV or EDIT
     bool     dirty_;         // true if in-memory config differs from on-disk
-    char     edit_buf_[20];  // draft value during EDIT (covers all field sizes)
+    char     edit_buf_[64];  // draft value during EDIT (sized for GROUPS, the longest field)
     uint8_t  edit_len_;      // current length of edit_buf_ (excl. NUL)
     bool     show_error_;    // true → render the error banner once
     bool     show_saved_;    // true → render the "Saved" banner once

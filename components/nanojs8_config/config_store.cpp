@@ -41,6 +41,7 @@ static const char* KEY_VERSION  = "v";
 static const char* KEY_CALLSIGN = "call";
 static const char* KEY_GRID     = "grid";
 static const char* KEY_RADIO    = "radio";
+static const char* KEY_GROUPS   = "groups";
 
 
 
@@ -75,6 +76,7 @@ static void apply_defaults() {
     safe_strcpy(s_current.callsign, sizeof(s_current.callsign), NANOJS8_DEFAULT_CALLSIGN);
     safe_strcpy(s_current.grid,     sizeof(s_current.grid),     NANOJS8_DEFAULT_GRID);
     safe_strcpy(s_current.radio,    sizeof(s_current.radio),    NANOJS8_DEFAULT_RADIO);
+    safe_strcpy(s_current.groups,   sizeof(s_current.groups),   NANOJS8_DEFAULT_GROUPS);
 }
 
 // -------------------------------------------------------------------------
@@ -160,6 +162,63 @@ bool valid_radio(const char* value) {
     return false;
 }
 
+bool valid_groups(const char* value) {
+    // Empty is valid (operator has no group memberships).
+    if (!value || value[0] == '\0') {
+        return true;
+    }
+    const size_t total_len = std::strlen(value);
+    if (total_len >= NANOJS8_GROUPS_MAXLEN) {
+        return false;
+    }
+    // Parse comma-separated entries. Each entry must match @[A-Z0-9]{1,9}.
+    // @ALLCALL and @HB are rejected (implicit at the protocol layer).
+    size_t entry_count   = 0;
+    size_t entry_start   = 0;
+    bool   parsing_entry = true;
+    for (size_t i = 0; i <= total_len; ++i) {
+        const char c = (i < total_len) ? value[i] : ',';  // virtual trailing comma
+        if (c == ',' || i == total_len) {
+            if (!parsing_entry) {
+                // Empty entry (",," or trailing ","): reject.
+                return false;
+            }
+            const size_t entry_len = i - entry_start;
+            // Minimum 2 chars ("@X"), maximum NANOJS8_GROUP_ENTRY_MAXLEN ("@" + 9).
+            if (entry_len < 2 || entry_len > NANOJS8_GROUP_ENTRY_MAXLEN) {
+                return false;
+            }
+            if (value[entry_start] != '@') {
+                return false;
+            }
+            // Body must be 1..9 uppercase alphanumerics.
+            for (size_t j = entry_start + 1; j < i; ++j) {
+                const char bc = value[j];
+                const bool ok = (bc >= 'A' && bc <= 'Z') || (bc >= '0' && bc <= '9');
+                if (!ok) {
+                    return false;
+                }
+            }
+            // Reject implicit groups.
+            if (entry_len == 8 && std::strncmp(&value[entry_start], "@ALLCALL", 8) == 0) {
+                return false;
+            }
+            if (entry_len == 3 && std::strncmp(&value[entry_start], "@HB", 3) == 0) {
+                return false;
+            }
+            entry_count++;
+            if (entry_count > NANOJS8_MAX_GROUPS) {
+                return false;
+            }
+            entry_start   = i + 1;
+            parsing_entry = false;
+        } else {
+            parsing_entry = true;
+        }
+    }
+    return true;
+}
+
 // -------------------------------------------------------------------------
 // Setters
 // -------------------------------------------------------------------------
@@ -214,6 +273,19 @@ esp_err_t set_radio(const char* value) {
     return ESP_OK;
 }
 
+esp_err_t set_groups(const char* value) {
+    if (!valid_groups(value)) {
+        ESP_LOGW(TAG, "set_groups: rejected %s", value ? value : "(null)");
+        return ESP_ERR_INVALID_ARG;
+    }
+    // valid_groups already enforces uppercase, so direct copy is correct.
+    // (The SETUP screen also uppercases letters at typing time; the
+    // validator's strict A-Z check is the canonical guarantee.)
+    safe_strcpy(s_current.groups, sizeof(s_current.groups),
+                value ? value : "");
+    return ESP_OK;
+}
+
 // -------------------------------------------------------------------------
 // load / save
 // -------------------------------------------------------------------------
@@ -246,11 +318,19 @@ esp_err_t load() {
         return err;
     }
 
-    // Migration check. Phase 1 has no migration paths to run, so any
-    // mismatch falls through to a default-and-rewrite. Phase 2+ will add
-    // case-by-case migrations here, e.g.:
-    //   if (persisted_version == 1) { migrate_v1_to_v2(handle); }
-    if (persisted_version != NANOJS8_CONFIG_VERSION) {
+    // Migration handling. v1 → v2 added the groups field; we preserve
+    // the existing callsign/grid/radio and default groups to empty.
+    // Other version mismatches (future schemas we don't understand,
+    // corruption) fall through to a default-and-rewrite.
+    bool needs_migration_save = false;
+    if (persisted_version == 1 && NANOJS8_CONFIG_VERSION == 2) {
+        ESP_LOGI(TAG, "Migrating config v1 → v2 (preserving CALL/GRID/RADIO, "
+                      "defaulting GROUPS to empty)");
+        needs_migration_save = true;
+        // Read happens below; we just flag a save() at the end. The
+        // groups field will be missing from NVS and the read_str
+        // helper below will fill in the default.
+    } else if (persisted_version != NANOJS8_CONFIG_VERSION) {
         ESP_LOGW(TAG, "Config version mismatch (on-disk=%u, code=%u); resetting to defaults",
                  (unsigned)persisted_version, (unsigned)NANOJS8_CONFIG_VERSION);
         apply_defaults();
@@ -287,12 +367,20 @@ esp_err_t load() {
         return e;
     };
 
-    s_current.version = persisted_version;
+    s_current.version = NANOJS8_CONFIG_VERSION;  // always store the current version
     read_str(KEY_CALLSIGN, s_current.callsign, sizeof(s_current.callsign), NANOJS8_DEFAULT_CALLSIGN);
     read_str(KEY_GRID,     s_current.grid,     sizeof(s_current.grid),     NANOJS8_DEFAULT_GRID);
     read_str(KEY_RADIO,    s_current.radio,    sizeof(s_current.radio),    NANOJS8_DEFAULT_RADIO);
+    read_str(KEY_GROUPS,   s_current.groups,   sizeof(s_current.groups),   NANOJS8_DEFAULT_GROUPS);
 
     nvs_close(handle);
+
+    // Flush after migration so the next boot finds v2 layout. The
+    // existing callsign/grid/radio values are preserved; only the
+    // version field and the new groups key (empty) are written.
+    if (needs_migration_save) {
+        return save();
+    }
     return ESP_OK;
 }
 
@@ -312,6 +400,7 @@ esp_err_t save() {
     if (err == ESP_OK) err = nvs_set_str(handle, KEY_CALLSIGN, s_current.callsign);
     if (err == ESP_OK) err = nvs_set_str(handle, KEY_GRID,     s_current.grid);
     if (err == ESP_OK) err = nvs_set_str(handle, KEY_RADIO,    s_current.radio);
+    if (err == ESP_OK) err = nvs_set_str(handle, KEY_GROUPS,   s_current.groups);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "save: nvs_set failed: %s", esp_err_to_name(err));
         nvs_close(handle);
@@ -325,8 +414,9 @@ esp_err_t save() {
         return err;
     }
     nvs_close(handle);
-    ESP_LOGI(TAG, "Config saved (call=%s grid=%s radio=%s)",
-             s_current.callsign, s_current.grid, s_current.radio);
+    ESP_LOGI(TAG, "Config saved (call=%s grid=%s radio=%s groups=%s)",
+             s_current.callsign, s_current.grid, s_current.radio,
+             s_current.groups[0] ? s_current.groups : "(none)");
     return ESP_OK;
 }
 
@@ -343,6 +433,7 @@ void log_current() {
     ESP_LOGI(TAG, "  callsign: %s", s_current.callsign);
     ESP_LOGI(TAG, "  grid:     %s", s_current.grid);
     ESP_LOGI(TAG, "  radio:    %s", s_current.radio);
+    ESP_LOGI(TAG, "  groups:   %s", s_current.groups[0] ? s_current.groups : "(none)");
 }
 
 bool is_default_callsign() {

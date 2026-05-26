@@ -136,7 +136,7 @@ static void render_splash(uint32_t free_dram_kb, bool sd_ok,
     d.printf("Built %s %s", NANOJS8_BUILD_DATE, NANOJS8_BUILD_TIME);
     d.setCursor(8, 122);
     d.setTextColor(TFT_DARKGREEN, TFT_BLACK);
-    d.printf("[entering SETUP...]");
+    d.printf("[loading...]");
 }
 
 // UI task — pinned to core 0. Renders the active screen and processes
@@ -146,6 +146,20 @@ static void ui_task(void* arg) {
     ESP_LOGI(TAG, "UI task started on core %d", xPortGetCoreID());
 
     nanojs8::ui::router_init();
+
+    // Boot-screen selection (Phase 2):
+    //   - Callsign is still the "NOCALL" placeholder → SETUP, so the
+    //     operator gets the config screen immediately.
+    //   - Otherwise → HOME, the at-a-glance status view.
+    // Matches MicroJS8's "configure first, operate after" bias.
+    const bool need_setup = nanojs8::config::is_default_callsign();
+    const nanojs8::ui::ScreenId initial =
+        need_setup ? nanojs8::ui::ScreenId::SETUP
+                   : nanojs8::ui::ScreenId::HOME;
+    ESP_LOGI(TAG, "Boot screen: %s (callsign %s)",
+             need_setup ? "SETUP" : "HOME",
+             need_setup ? "is default placeholder" : "is configured");
+    nanojs8::ui::router_set_screen(initial);
 
     const TickType_t tick_period = pdMS_TO_TICKS(50);  // 20 Hz
     TickType_t last_wake = xTaskGetTickCount();

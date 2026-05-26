@@ -5,37 +5,42 @@
 // in the ring. Each screen implements the IScreen interface; the router
 // holds a registry and dispatches events.
 //
-// Phase 1: only the SETUP screen is registered. LEFT/RIGHT log a stub
-// message ("screen ring not populated yet"). Phase 2 expands the ring
-// to all 7 screens.
+// Phase 2: all 7 screens registered. HOME displays current operator
+// state (callsign, grid, GPS status etc.); SETUP is fully editable
+// (Phase 1 behavior); the remaining 5 (HEARD, DIRECTED, INBOX,
+// COMPOSE, ALLCALL) are placeholders that will be filled out in
+// Phases 4-6.
+//
+// Screen ring order, matches MicroJS8 (minus the EMERGENCY screen
+// which NanoJS8 replaces with the $GPS token in COMPOSE):
+//   HOME → HEARD → DIRECTED → INBOX → COMPOSE → ALLCALL → SETUP → HOME
 
 #pragma once
 
 #include <cstdint>
 #include "input_event.h"
 
-
 namespace nanojs8 {
 namespace ui {
 
-// Stable identity for each screen in the ring. The numeric values are
-// the ring order: LEFT moves toward SETUP, RIGHT moves toward DOCTOR.
-// Phase 1 only implements SETUP; the others are reserved.
+// Stable identity for each screen in the ring. The numeric values
+// reflect ring order (0 == HOME, RIGHT moves toward higher numbers
+// up to SETUP, then wraps back to HOME).
 enum class ScreenId : uint8_t {
-    SETUP    = 0,
-    RECEIVE  = 1,
-    COMPOSE  = 2,
-    INBOX    = 3,
-    GPS      = 4,
-    MAP      = 5,
-    DOCTOR   = 6,
+    HOME      = 0,
+    HEARD     = 1,
+    DIRECTED  = 2,
+    INBOX     = 3,
+    COMPOSE   = 4,
+    ALLCALL   = 5,
+    SETUP     = 6,
     COUNT
 };
 
 // Screen interface. Each concrete screen provides a constexpr id() and
 // implements handle_event() and render(). The router calls render()
-// after every event dispatch and at a low background rate (~5 Hz) for
-// time-based redraw needs (e.g. the clock in later screens).
+// after every event dispatch and at a low background rate for time-
+// based redraw needs (e.g. the clock in later screens).
 class IScreen {
 public:
     virtual ~IScreen() = default;
@@ -57,10 +62,24 @@ public:
     // background tick. Implementations should be idempotent and cheap
     // to call repeatedly; only redraw the regions that changed.
     virtual void render() = 0;
+
+    // Is the screen currently in a text-editing mode? When true, the
+    // router suppresses bare-arrow translation for `,` and `/` so the
+    // operator can type those characters into a field. SETUP is the
+    // only Phase 2 screen that uses this; others return false.
+    //
+    // Default returns false (screen is in nav mode, ring nav allowed).
+    virtual bool is_editing_text() const { return false; }
 };
 
-// Router lifetime. Call once at startup.
+// Router lifetime. Call once at startup, then call router_set_screen()
+// before router_tick() begins running.
 void router_init();
+
+// Set the starting screen. Called by main() after determining whether
+// the operator's callsign is configured (HOME) or not yet (SETUP).
+// Must be called after router_init() and before the first router_tick().
+void router_set_screen(ScreenId initial);
 
 // Per-tick service: poll the input translator, dispatch events,
 // trigger render. Caller (the UI task) should invoke this at the UI
@@ -72,7 +91,7 @@ void router_tick();
 void router_redraw();
 
 // Programmatically switch screens. Used by hotkeys or by screens
-// themselves (e.g. SETUP's "saved" confirmation → RECEIVE in Phase 2).
+// themselves (e.g. SETUP commit → HOME in Phase 5+).
 void router_go_to(ScreenId target);
 
 } // namespace ui

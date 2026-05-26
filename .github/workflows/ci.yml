@@ -85,7 +85,7 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: nanojs8-phase1-firmware
+          name: nanojs8-phase2-firmware
           path: |
             build/nanojs8.bin
             build/nanojs8.elf
