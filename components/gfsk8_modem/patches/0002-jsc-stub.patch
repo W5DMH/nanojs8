@@ -1,0 +1,41 @@
+# NanoJS8 patch 0002 — JSC dictionary stub.
+#
+# STATUS: PLACEHOLDER for Phase 0.
+# Real .patch is regenerated against actual upstream HEAD by
+# tools/apply_gfsk8_patches.ps1 on first clone.
+#
+# RATIONALE:
+# gfsk8-modem-clean ships JSC.cpp with three large static tables:
+#   - JSC::prefix[]  (103 entries, ~few KB)
+#   - JSC::map[]     (~10,000 string-to-code entries, ~6-8 MB compiled)
+#   - JSC::list[]    (~10,000 reverse lookup, ~6-8 MB compiled)
+#
+# Combined, these tables produce a ~12 MB object file that does not fit in
+# our 4 MB factory app partition.
+#
+# JS8 2.2 explicitly deprecates the JSC compression scheme; Huffman-only
+# encoding is the on-the-air default for all modern JS8Call (versions 2.2+).
+# NanoJS8 ships Huffman-only and accepts incoming JSC frames as opaque (we
+# decode the bit-level frame structure but skip JSC text expansion).
+#
+# WHAT THE PATCH DOES:
+#   - Keeps JSC::prefix[] intact — needed by extendedChars() at decode time
+#     for Huffman extended-character handling.
+#   - Replaces JSC::map[] with an empty array of the same type.
+#   - Replaces JSC::list[] with an empty array of the same type.
+#   - Adjusts any size constants that the algorithm derives from list/map size.
+#
+# RESULT: gfsk8 modem still links and decodes correctly. JSC-compressed
+# message bodies are passed to the application as raw 87-bit payloads marked
+# as type=JSC; the UI shows "[JSC-encoded message]" and offers no decode.
+# Outgoing TX never uses JSC.
+#
+# EXPECTED DIFF SHAPE (regenerated against actual upstream):
+#
+#   The patch replaces JSC.cpp wholesale with src/JSC_stub.cpp content (see
+#   components/gfsk8_modem/src/JSC_stub.cpp), or applies a sed-style transform
+#   of the existing JSC.cpp depending on which approach has lower drift risk
+#   against upstream.
+#
+# WHEN THE REAL .patch IS WRITTEN, IT REPLACES THE TEXT IN THIS FILE.
+# THIS PLACEHOLDER MUST NOT BE APPLIED VIA `git apply` — it is documentation.

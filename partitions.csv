@@ -1,0 +1,18 @@
+# NanoJS8 partition table — Cardputer ADV ESP32-S3FN8 (8 MB flash)
+#
+# Layout per Build Specification §4.3:
+#   nvs       0x010000     32 KB    config (callsign, profile, GPS, grid, etc.)
+#   phy_init  0x018000      4 KB    radio PHY init data (unused — WiFi off)
+#   factory   0x020000   4096 KB    application binary
+#   spiffs    0x420000   3712 KB    inbox.jsonl, log.jsonl, etc.
+#   coredump  0x7C0000    256 KB    post-mortem panic captures
+#
+# Note: NVS uses 4 sectors (32 KB) for headroom on Cardputer ADV ES8311 / TCA8418
+# config; Mini-FT8 used 24 KB but ran into wear-level shortage. 32 KB is safe.
+#
+# Name,     Type, SubType,  Offset,    Size,      Flags
+nvs,        data, nvs,      0x010000,  0x008000,
+phy_init,   data, phy,      0x018000,  0x001000,
+factory,    app,  factory,  0x020000,  0x400000,
+spiffs,     data, spiffs,   0x420000,  0x3A0000,
+coredump,   data, coredump, 0x7C0000,  0x040000,

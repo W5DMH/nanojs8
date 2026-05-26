@@ -1,0 +1,75 @@
+name: NanoJS8 CI
+
+# Runs on every push and PR. Pinned to ESP-IDF v5.5.4 via Docker image —
+# this is the reproducibility guarantee from BUILD_ENVIRONMENT.md.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  firmware-build:
+    name: Firmware build (esp32s3)
+    runs-on: ubuntu-latest
+    container:
+      # Pinned to the exact IDF version specified in BUILD_ENVIRONMENT.md.
+      # Espressif keeps these images on Docker Hub indefinitely.
+      image: espressif/idf:v5.5.4
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Fetch vendored components (bash equivalent)
+        run: |
+          # The .ps1 script is Windows-only; CI uses a bash equivalent.
+          # Phase 0 just needs to confirm the project structure compiles,
+          # so we inline the fetch logic rather than maintaining a parallel
+          # .sh script that could drift.
+          set -euo pipefail
+          mkdir -p components
+
+          git clone --depth 1 --branch 0.2.17 https://github.com/m5stack/M5GFX.git components/M5GFX
+          rm -rf components/M5GFX/.git
+          echo -n "0.2.17" > components/M5GFX/.nanojs8_pin
+
+          git clone --depth 1 --branch 0.2.11 https://github.com/m5stack/M5Unified.git components/M5Unified
+          rm -rf components/M5Unified/.git
+          echo -n "0.2.11" > components/M5Unified/.nanojs8_pin
+
+          git clone --depth 1 --branch 1.1.1 https://github.com/m5stack/M5Cardputer.git components/M5Cardputer
+          rm -rf components/M5Cardputer/.git
+          echo -n "1.1.1" > components/M5Cardputer/.nanojs8_pin
+
+      - name: Configure build target
+        shell: bash
+        run: |
+          . $IDF_PATH/export.sh
+          idf.py set-target esp32s3
+
+      - name: Build
+        shell: bash
+        run: |
+          . $IDF_PATH/export.sh
+          idf.py build
+
+      - name: Report size
+        shell: bash
+        run: |
+          . $IDF_PATH/export.sh
+          idf.py size
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nanojs8-phase0-firmware
+          path: |
+            build/nanojs8.bin
+            build/nanojs8.elf
+            build/nanojs8.map
+            build/partition_table/partition-table.bin
+            build/bootloader/bootloader.bin
+          retention-days: 30

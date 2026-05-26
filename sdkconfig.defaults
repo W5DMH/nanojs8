@@ -1,0 +1,78 @@
+# NanoJS8 — Default Kconfig overrides
+#
+# This file is read by the build system on every clean build. Once sdkconfig
+# exists (after first `idf.py reconfigure`), this file is ignored unless
+# explicitly re-applied. Treat it as the project's source-controlled config
+# baseline; never edit sdkconfig directly.
+
+# ----------------------------------------------------------------------------
+# Target & toolchain
+# ----------------------------------------------------------------------------
+CONFIG_IDF_TARGET="esp32s3"
+
+# C++20 — required by gfsk8-modem-clean (<span>, <numbers>).
+CONFIG_COMPILER_CXX_EXCEPTIONS=n
+CONFIG_COMPILER_CXX_RTTI=n
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y
+
+# ----------------------------------------------------------------------------
+# Partition table
+# ----------------------------------------------------------------------------
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_OFFSET=0x8000
+
+# ----------------------------------------------------------------------------
+# Flash
+# ----------------------------------------------------------------------------
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+# ----------------------------------------------------------------------------
+# CPU
+# ----------------------------------------------------------------------------
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_FREERTOS_HZ=1000
+
+# ----------------------------------------------------------------------------
+# Logging
+# ----------------------------------------------------------------------------
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_MAXIMUM_LEVEL_VERBOSE=y
+CONFIG_LOG_COLORS=y
+
+# ----------------------------------------------------------------------------
+# Console — use USB Serial JTAG (the Cardputer ADV's USB-C-to-host link),
+# NOT UART. UART pins are needed for other functions on this board.
+# ----------------------------------------------------------------------------
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_SUPPORT_PRINTF=y
+
+# ----------------------------------------------------------------------------
+# WiFi / BLE — disabled in v1.0 per spec.
+# Leaving the radio stack out saves ~120 KB flash and ~30 KB DRAM.
+# Kconfig flag CONFIG_NANOJS8_ENABLE_BLE will toggle these on for variant builds.
+# ----------------------------------------------------------------------------
+# (Both are off by default in IDF starter; we just don't enable them.)
+
+# ----------------------------------------------------------------------------
+# Memory
+# ----------------------------------------------------------------------------
+# Allow heap allocations to walk into 8-bit-accessible IRAM if DRAM runs out.
+# This is the same setting Mini-FT8 uses on Cardputer ADV.
+CONFIG_HEAP_PLACE_FUNCTION_INTO_FLASH=y
+CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y
+CONFIG_ESP_DEBUG_STUBS_ENABLE=y
+
+# Stack size for the main task (where app_main runs). Default is 3584; we bump
+# to 8192 for safety during init.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# ----------------------------------------------------------------------------
+# Core dump on panic — written to coredump partition for post-mortem.
+# ----------------------------------------------------------------------------
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y

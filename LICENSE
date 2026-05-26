@@ -1,0 +1,21 @@
+                    GNU GENERAL PUBLIC LICENSE
+                       Version 3, 29 June 2007
+
+ Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>
+ Everyone is permitted to copy and distribute verbatim copies
+ of this license document, but changing it is not allowed.
+
+NanoJS8 is licensed under the GNU General Public License v3.0.
+Full license text: https://www.gnu.org/licenses/gpl-3.0.txt
+
+This project derives from and incorporates:
+  - gfsk8-modem-clean (jfrancis42), GPL-3.0
+  - MicroJS8 (W5DMH), lineage from JS8Call (KN4CRD)
+  - Mini-FT8 (AG6AQ/N6HAN), bring-up code
+
+By contributing to NanoJS8 you agree your contribution is licensed under
+GPL-3.0 and may be redistributed under that license.
+
+See https://www.gnu.org/licenses/gpl-3.0.txt for the complete license text,
+or run `idf.py docs` for an in-tree copy when the project documentation is
+built.

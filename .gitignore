@@ -1,0 +1,38 @@
+# ESP-IDF build outputs
+build/
+sdkconfig
+sdkconfig.old
+sdkconfig.*.old
+dependencies.lock.local
+managed_components/
+
+# Editor / IDE
+.vs/
+*.swp
+*~
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local-only files
+*.local
+.env
+
+# Vendored components fetched by tools/fetch_components.ps1 — re-fetched per
+# clone rather than committed (saves ~140 MB repo size).
+components/M5GFX/
+components/M5Unified/
+components/M5Cardputer/
+
+# gfsk8 upstream cloned by tools/apply_gfsk8_patches.ps1 — re-cloned per clone.
+components/gfsk8_modem/upstream/
+
+# Stamp files written by fetch_components to mark pinned versions
+.nanojs8_pin

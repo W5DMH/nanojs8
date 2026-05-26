@@ -1,0 +1,21 @@
+# Default to LF line endings, autocrlf off — needed because mixed CRLF/LF
+# breaks `git apply` for the gfsk8 patch files.
+* text=auto eol=lf
+
+# Treat binary artifacts explicitly so git doesn't try to normalize them.
+*.bin    binary
+*.elf    binary
+*.so     binary
+*.dll    binary
+*.png    binary
+*.jpg    binary
+*.pdf    binary
+
+# Patch files MUST be LF — patch utilities reject CRLF context lines.
+*.patch  text eol=lf
+*.diff   text eol=lf
+
+# PowerShell scripts use CRLF (Windows convention).
+*.ps1    text eol=crlf
+*.bat    text eol=crlf
+*.cmd    text eol=crlf

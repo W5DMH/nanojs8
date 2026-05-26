@@ -1,0 +1,16 @@
+## IDF Component Manager manifest for NanoJS8 main component.
+##
+## Phase 0: minimal set. We add USB-host components in Phase 3 when the radio
+## binding is implemented.
+##
+## Version pins match Mini-FT8's verified-working baseline against ESP-IDF v5.5,
+## bumped to the latest bugfix release in that minor line where available.
+## Pinning matters: see BUILD_ENVIRONMENT.md for the reproducibility strategy.
+
+dependencies:
+  idf:
+    version: ">=5.5.0,<6.0"
+
+  ## ES8311 audio codec helpers — used by board_audio in Phase 4, harmless to
+  ## list here so dependencies.lock captures the version we commit to.
+  espressif/esp_codec_dev: "^1.5.9"

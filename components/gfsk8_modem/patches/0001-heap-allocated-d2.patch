@@ -1,0 +1,53 @@
+# NanoJS8 patch 0001 — heap-allocated d2 audio buffer.
+#
+# STATUS: PLACEHOLDER for Phase 0.
+# This file documents the intent of the patch. The real .patch with line
+# numbers and context is regenerated against the actual upstream HEAD by
+# tools/apply_gfsk8_patches.ps1 the first time it runs after a clone, to
+# avoid drift between this repo and upstream commits.
+#
+# RATIONALE:
+# gfsk8-modem-clean's commons.h declares:
+#
+#   #define GFSK8_RX_SAMPLE_SIZE (60 * GFSK8_RX_SAMPLE_RATE)
+#   struct RxAudioBuffer {
+#       std::int16_t d2[GFSK8_RX_SAMPLE_SIZE];
+#       ...
+#   };
+#
+# At 12 kHz that's 720,000 samples = 1,440,000 bytes = 1.44 MB.
+# The ESP32-S3FN8 has 512 KB SRAM total. The struct will not fit.
+#
+# Per Build Specification §4 (memory budget) we:
+#   - Shrink the buffer to 204,800 samples (~17 s at 12 kHz, slot+margin)
+#     = 409,600 bytes
+#   - Convert d2 from a member array to a heap-allocated pointer, so it can
+#     be malloc()'d before decode() and free()'d after, leaving ~190 KB
+#     steady-state DRAM free.
+#
+# EXPECTED DIFF (will be regenerated against actual upstream HEAD):
+#
+#   --- a/src/commons.h
+#   +++ b/src/commons.h
+#   @@
+#   -#define GFSK8_RX_SAMPLE_SIZE (60 * GFSK8_RX_SAMPLE_RATE)
+#   +// NanoJS8: ring sized for Normal-mode only (one 15 s period + ~2 s margin).
+#   +#define GFSK8_RX_SAMPLE_SIZE 204800
+#
+#    struct RxAudioBuffer {
+#   -    std::int16_t d2[GFSK8_RX_SAMPLE_SIZE];
+#   +    std::int16_t *d2;  // heap-allocated by caller before decode()
+#        ...
+#    };
+#
+# CALLER CONTRACT (will be enforced in components/nanojs8_audio in Phase 4):
+#   1. Before invoking gfsk8::Decoder::decode(buf):
+#        buf.d2 = (int16_t*)heap_caps_malloc(GFSK8_RX_SAMPLE_SIZE * sizeof(int16_t),
+#                                            MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+#        if (!buf.d2) { decode_error("DRAM exhausted"); return; }
+#   2. After decode() returns:
+#        heap_caps_free(buf.d2);
+#        buf.d2 = nullptr;
+#
+# WHEN THE REAL .patch IS WRITTEN, IT REPLACES THE TEXT IN THIS FILE.
+# THIS PLACEHOLDER MUST NOT BE APPLIED VIA `git apply` — it is documentation.
