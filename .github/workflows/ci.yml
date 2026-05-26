@@ -36,13 +36,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p components
-
           if [ ! -d components/M5GFX ]; then
             git clone --depth 1 --branch 0.2.17 https://github.com/m5stack/M5GFX.git components/M5GFX
             rm -rf components/M5GFX/.git
             echo -n "0.2.17" > components/M5GFX/.nanojs8_pin
           fi
-
           if [ ! -d components/M5Unified ]; then
             git clone --depth 1 --branch 0.2.11 https://github.com/m5stack/M5Unified.git components/M5Unified
             rm -rf components/M5Unified/.git
@@ -58,12 +56,12 @@ jobs:
         run: |
           set -euo pipefail
           if ! grep -q "Wno-error=maybe-uninitialized" components/M5Unified/CMakeLists.txt; then
-            cat >> components/M5Unified/CMakeLists.txt <<'EOF'
-
-# NanoJS8: suppress GCC 14's stricter maybe-uninitialized check for M5Unified.
-# Triggered by RTC_PowerHub_Class::setAlarmIRQ on the IDF v5.5.4 toolchain.
-target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-error=maybe-uninitialized)
-EOF
+            echo "" >> components/M5Unified/CMakeLists.txt
+            echo "# NanoJS8: suppress GCC 14 maybe-uninitialized false positive in RTC_PowerHub_Class." >> components/M5Unified/CMakeLists.txt
+            echo "target_compile_options(\${COMPONENT_LIB} PRIVATE -Wno-error=maybe-uninitialized)" >> components/M5Unified/CMakeLists.txt
+            echo "Patched M5Unified/CMakeLists.txt"
+          else
+            echo "M5Unified/CMakeLists.txt already patched, skipping"
           fi
 
       - name: Configure target
