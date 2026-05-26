@@ -29,7 +29,6 @@ desktop.ini
 # clone rather than committed (saves ~140 MB repo size).
 components/M5GFX/
 components/M5Unified/
-components/M5Cardputer/
 
 # gfsk8 upstream cloned by tools/apply_gfsk8_patches.ps1 — re-cloned per clone.
 components/gfsk8_modem/upstream/

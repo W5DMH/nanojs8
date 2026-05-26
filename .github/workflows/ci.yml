@@ -1,6 +1,6 @@
 name: NanoJS8 CI
 
-# Runs on every push and PR. Pinned to ESP-IDF v5.5.4 via Docker image —
+# Runs on every push and PR. Pinned to ESP-IDF v5.5.4 via Docker image ?
 # this is the reproducibility guarantee from BUILD_ENVIRONMENT.md.
 
 on:
@@ -14,51 +14,73 @@ jobs:
     name: Firmware build (esp32s3)
     runs-on: ubuntu-latest
     container:
-      # Pinned to the exact IDF version specified in BUILD_ENVIRONMENT.md.
-      # Espressif keeps these images on Docker Hub indefinitely.
       image: espressif/idf:v5.5.4
+
+    # Force bash for every `run:` step in this job. The default container shell
+    # is /bin/sh (dash on Ubuntu), which rejects `set -o pipefail` and other
+    # bashisms. We use bash idioms throughout so this is mandatory.
+    defaults:
+      run:
+        shell: bash
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Fetch vendored components (bash equivalent)
+      - name: Fetch upstream M5Stack libraries
+        # M5Cardputer is NOT fetched here ? it requires NanoJS8-specific patches
+        # (Arduino.h shim, ESP-IDF I2C driver port) and is vendored directly in
+        # components/M5Cardputer/. See BUILD_ENVIRONMENT.md for provenance.
         run: |
-          # The .ps1 script is Windows-only; CI uses a bash equivalent.
-          # Phase 0 just needs to confirm the project structure compiles,
-          # so we inline the fetch logic rather than maintaining a parallel
-          # .sh script that could drift.
           set -euo pipefail
           mkdir -p components
 
-          git clone --depth 1 --branch 0.2.17 https://github.com/m5stack/M5GFX.git components/M5GFX
-          rm -rf components/M5GFX/.git
-          echo -n "0.2.17" > components/M5GFX/.nanojs8_pin
+          if [ ! -d components/M5GFX ]; then
+            git clone --depth 1 --branch 0.2.17 https://github.com/m5stack/M5GFX.git components/M5GFX
+            rm -rf components/M5GFX/.git
+            echo -n "0.2.17" > components/M5GFX/.nanojs8_pin
+          fi
 
-          git clone --depth 1 --branch 0.2.11 https://github.com/m5stack/M5Unified.git components/M5Unified
-          rm -rf components/M5Unified/.git
-          echo -n "0.2.11" > components/M5Unified/.nanojs8_pin
+          if [ ! -d components/M5Unified ]; then
+            git clone --depth 1 --branch 0.2.11 https://github.com/m5stack/M5Unified.git components/M5Unified
+            rm -rf components/M5Unified/.git
+            echo -n "0.2.11" > components/M5Unified/.nanojs8_pin
+          fi
 
-          git clone --depth 1 --branch 1.1.1 https://github.com/m5stack/M5Cardputer.git components/M5Cardputer
-          rm -rf components/M5Cardputer/.git
-          echo -n "1.1.1" > components/M5Cardputer/.nanojs8_pin
-
-      - name: Configure build target
-        shell: bash
+      - name: Patch M5Unified for GCC 14 false-positive
+        # ESP-IDF v5.5.4 ships GCC 14.2.0, which has stricter -Wmaybe-uninitialized
+        # analysis across inlined call boundaries than the GCC version M5Unified
+        # was written against. RTC_PowerHub_Class::setAlarmIRQ trips a false
+        # positive that is fatal with -Werror. We downgrade to warning for the
+        # M5Unified component only.
         run: |
+          set -euo pipefail
+          if ! grep -q "Wno-error=maybe-uninitialized" components/M5Unified/CMakeLists.txt; then
+            cat >> components/M5Unified/CMakeLists.txt <<'EOF'
+
+# NanoJS8: suppress GCC 14's stricter maybe-uninitialized check for M5Unified.
+# Triggered by RTC_PowerHub_Class::setAlarmIRQ on the IDF v5.5.4 toolchain.
+target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-error=maybe-uninitialized)
+EOF
+          fi
+
+      - name: Configure target
+        run: |
+          set -euo pipefail
           . $IDF_PATH/export.sh
           idf.py set-target esp32s3
 
       - name: Build
-        shell: bash
         run: |
+          set -euo pipefail
           . $IDF_PATH/export.sh
           idf.py build
 
       - name: Report size
-        shell: bash
         run: |
+          set -euo pipefail
           . $IDF_PATH/export.sh
           idf.py size
 
