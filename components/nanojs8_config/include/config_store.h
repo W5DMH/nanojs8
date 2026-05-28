@@ -69,6 +69,10 @@ esp_err_t set_grid    (const char* value);
 esp_err_t set_radio   (const char* value);
 esp_err_t set_groups  (const char* value);
 
+// Phase 3a v3 — radio auto-start. Plain boolean, no validation needed
+// beyond the type. Persisted as nvs uint8 (0 or 1).
+esp_err_t set_radio_autostart(bool value);
+
 // Validation helpers — exposed so the SETUP screen can re-check a draft
 // value at character-insertion time (live red-highlight as the user
 // types) without committing to current().

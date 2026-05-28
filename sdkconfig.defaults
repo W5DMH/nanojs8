@@ -10,8 +10,11 @@
 # ----------------------------------------------------------------------------
 CONFIG_IDF_TARGET="esp32s3"
 
-# C++20 — required by gfsk8-modem-clean (<span>, <numbers>).
-CONFIG_COMPILER_CXX_EXCEPTIONS=n
+# C++ exceptions — REQUIRED for Phase 3a's VCP CP210x driver.
+# espressif/usb_host_vcp and usb_host_cp210x_vcp use 'throw' for error
+# propagation; building them with -fno-exceptions fails with
+# "exception handling disabled" errors. Cost is ~30 KB binary size.
+CONFIG_COMPILER_CXX_EXCEPTIONS=y
 CONFIG_COMPILER_CXX_RTTI=n
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y
@@ -44,11 +47,49 @@ CONFIG_LOG_MAXIMUM_LEVEL_VERBOSE=y
 CONFIG_LOG_COLORS=y
 
 # ----------------------------------------------------------------------------
-# Console — use USB Serial JTAG (the Cardputer ADV's USB-C-to-host link),
-# NOT UART. UART pins are needed for other functions on this board.
+# Console — Phase 3a: USB-C goes to USB-OTG host duty (DigiRig + radio),
+# so the console moves to UART0 on GPIO 1 (TX) / GPIO 2 (RX) accessed via
+# the Cardputer ADV's Grove port. Operators connect an external USB-UART
+# cable to the Grove port to see logs and issue commands.
+#
+# Pin map (Grove on Cardputer ADV):
+#   Pin 1 (Black/GND)  — GND
+#   Pin 2 (Red/5V)     — leave unconnected (Cardputer self-powers)
+#   Pin 3 (Yellow/G1)  — GPIO 1 — ESP TX → cable RX
+#   Pin 4 (White/G2)   — GPIO 2 — ESP RX → cable TX
+#
+# Phase 0/1/2 used CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y. Phase 3a flips
+# to UART0_CUSTOM. Flashing still happens via the USB-C port — the ROM
+# bootloader's USB-CDC activates in DOWNLOAD mode regardless of the
+# running firmware's console choice.
 # ----------------------------------------------------------------------------
-CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
-CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_SUPPORT_PRINTF=y
+CONFIG_ESP_CONSOLE_UART_CUSTOM=y
+CONFIG_ESP_CONSOLE_UART=y
+CONFIG_ESP_CONSOLE_UART_CUSTOM_NUM_0=y
+CONFIG_ESP_CONSOLE_UART_NUM=0
+CONFIG_ESP_CONSOLE_UART_TX_GPIO=1
+CONFIG_ESP_CONSOLE_UART_RX_GPIO=2
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# ----------------------------------------------------------------------------
+# USB OTG host stack — required by nanojs8_radio component.
+# Balanced FIFO bias gives IN 408 / OUT 192 bytes, which comfortably fits
+# DigiRig CM108's mono 16-bit 48 kHz audio (96 B/dir/ms) with margin for
+# concurrent CDC traffic on the PTT port. See Phase 3a design notes.
+#
+# External hub support is required for the powered-hub test setup (Belkin
+# F4U022 etc.). Without this the host stack sees a hub but refuses to
+# enumerate it, so DigiRig (connected to a hub downstream port) is invisible.
+# Multi-level support is irrelevant for our single-hub topology but is
+# included for free since it's default-on once HUBS_SUPPORTED is enabled.
+#
+# (CONFIG_USB_OTG_SUPPORTED is a hidden auto-symbol on ESP32-S3; the
+# host stack components below pull it in transitively. We don't need
+# to assert it here.)
+# ----------------------------------------------------------------------------
+CONFIG_USB_HOST_HW_BUFFER_BIAS_BALANCED=y
+CONFIG_USB_HOST_HUBS_SUPPORTED=y
 
 # ----------------------------------------------------------------------------
 # WiFi / BLE — disabled in v1.0 per spec.

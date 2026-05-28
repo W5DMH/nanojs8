@@ -1,11 +1,9 @@
-# NanoJS8 — main component CMakeLists.txt (Phase 1)
+# NanoJS8 — main component CMakeLists.txt (Phase 3a)
 #
-# Phase 1 adds two project-owned components to the dependency graph:
-#   - nanojs8_config: NVS-backed configuration
-#   - nanojs8_ui:     input translator + screen router + screens
-#
-# These transitively pull in M5Cardputer/M5Unified/M5GFX (via nanojs8_ui)
-# and nvs_flash (via nanojs8_config), so we don't need to list them here.
+# Phase 3a additions:
+#   - nanojs8_radio: USB host + UAC + CP2102 PTT subsystem
+#   - console:        ESP-IDF console library for `radio start/stop/status`
+#                     and `ptt on/off` commands over UART0 (the new console)
 
 idf_component_register(
     SRCS "main.cpp"
@@ -13,6 +11,7 @@ idf_component_register(
     REQUIRES
         nanojs8_config
         nanojs8_ui
+        nanojs8_radio
         M5Unified
         M5GFX
         M5Cardputer
@@ -21,6 +20,7 @@ idf_component_register(
         sdmmc
         esp_driver_sdspi
         nvs_flash
+        console
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra -Wno-unused-parameter)

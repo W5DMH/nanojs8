@@ -11,14 +11,20 @@
 //   |   CALL :  W5DMH                        |   from NVS
 //   |   GRID :  EM10                         |   from NVS
 //   |   GPS  :  No fix                       |   Phase 6 fills in
-//   |   FREQ :  ----                         |   Phase 3 fills in
-//   |   CAT  :  Disconnected                 |   Phase 3 fills in
+//   |   FREQ :  ----                         |   Phase 3c (CAT-providing profiles)
+//   |   CAT  :  DigiRig RTS-PTT *TX*         |   Phase 3a: live from radio_service
 //   |   INBOX:  0 unread                     |   Phase 6 fills in
 //   |                                        |
 //   |               [ EXIT ]                 |   focusable, Phase 7 wires
 //   |                                        |
 //   | < prev   > next                        |   ring nav hint
 //   +----------------------------------------+
+//
+// Phase 3a wires CAT and FREQ to the radio_service snapshot, polled at
+// 2 Hz from render(). FREQ stays "----" for profiles that don't read
+// frequency from the radio (digirig_unknown). CAT shows the active
+// profile's display name when connected, or status text otherwise.
+// PTT-on appends " *TX*" in red.
 //
 // In Phase 2, the only interactive widget is the EXIT button (Tab
 // gives it focus; Enter on it is a logged no-op deferred to Phase 7).
@@ -45,11 +51,19 @@ public:
     // is_editing_text() == false is correct.
 
 private:
-    // Phase 2 only has one focusable element (EXIT). When Tab is
+    // Phase 2 only had one focusable element (EXIT). When Tab is
     // pressed, focus toggles between "no focus" (status rows are
     // implicitly highlighted via NVS values) and "EXIT focused".
-    bool exit_focused_;
-    bool needs_redraw_;
+    bool     exit_focused_;
+    bool     needs_redraw_;
+
+    // Phase 3a: cached radio snapshot for CAT / FREQ rows. Re-fetched
+    // by render() at most every SNAPSHOT_INTERVAL_MS to avoid pounding
+    // the snapshot path on every render tick.
+    uint32_t last_snapshot_ms_;
+    char     cat_text_[40];
+    char     freq_text_[24];
+    bool     ptt_active_cached_;
 
     void draw_full();
 };

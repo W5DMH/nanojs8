@@ -3,11 +3,14 @@
 #include "screens/home_screen.h"
 
 #include <cstring>
+#include <cstdio>
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include <M5Cardputer.h>
 
 #include "config_store.h"
+#include "radio_service.h"
 
 namespace nanojs8 {
 namespace ui {
@@ -38,7 +41,13 @@ namespace layout {
 HomeScreen::HomeScreen()
     : exit_focused_(false)
     , needs_redraw_(true)
+    , last_snapshot_ms_(0)
+    , ptt_active_cached_(false)
 {
+    std::strncpy(cat_text_,  "Disconnected", sizeof(cat_text_)  - 1);
+    cat_text_ [sizeof(cat_text_)  - 1] = '\0';
+    std::strncpy(freq_text_, "----",         sizeof(freq_text_) - 1);
+    freq_text_[sizeof(freq_text_) - 1] = '\0';
 }
 
 void HomeScreen::on_enter() {
@@ -80,6 +89,50 @@ bool HomeScreen::handle_event(const InputEvent& ev) {
 }
 
 void HomeScreen::render() {
+    // Phase 3a: refresh the CAT / FREQ row caches from radio_service
+    // snapshot at most every 500 ms. Doing this even when not redrawing
+    // means we notice changes and force a redraw at the next tick.
+    constexpr uint32_t SNAPSHOT_INTERVAL_MS = 500;
+    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    if ((now_ms - last_snapshot_ms_) >= SNAPSHOT_INTERVAL_MS) {
+        last_snapshot_ms_ = now_ms;
+
+        nanojs8::radio::Snapshot snap;
+        nanojs8::radio::snapshot(&snap);
+
+        // CAT row: use the status_text which already includes the PTT
+        // indicator and profile name when connected, or the generic
+        // disconnected/error/etc. message otherwise.
+        char new_cat[sizeof(cat_text_)];
+        std::strncpy(new_cat, snap.status_text, sizeof(new_cat) - 1);
+        new_cat[sizeof(new_cat) - 1] = '\0';
+
+        char new_freq[sizeof(freq_text_)];
+        if (snap.supports_freq && snap.freq_hz != 0) {
+            // Format as e.g. "14.078 MHz". Avoid floating point — the
+            // ESP32-S3 has FPU but printf with %.3f drags a lot of code.
+            const uint32_t mhz_int    = snap.freq_hz / 1000000;
+            const uint32_t mhz_frac   = (snap.freq_hz % 1000000) / 1000;
+            std::snprintf(new_freq, sizeof(new_freq),
+                          "%lu.%03lu MHz",
+                          (unsigned long)mhz_int, (unsigned long)mhz_frac);
+        } else {
+            std::strncpy(new_freq, "----", sizeof(new_freq) - 1);
+            new_freq[sizeof(new_freq) - 1] = '\0';
+        }
+
+        if (std::strcmp(new_cat, cat_text_) != 0 ||
+            std::strcmp(new_freq, freq_text_) != 0 ||
+            snap.ptt_active != ptt_active_cached_) {
+            std::strncpy(cat_text_,  new_cat,  sizeof(cat_text_)  - 1);
+            cat_text_ [sizeof(cat_text_)  - 1] = '\0';
+            std::strncpy(freq_text_, new_freq, sizeof(freq_text_) - 1);
+            freq_text_[sizeof(freq_text_) - 1] = '\0';
+            ptt_active_cached_ = snap.ptt_active;
+            needs_redraw_ = true;
+        }
+    }
+
     if (!needs_redraw_) {
         return;
     }
@@ -108,15 +161,24 @@ void HomeScreen::draw_full() {
     };
 
     // Build status rows. Some values are conditional: callsign in
-    // red if it's the NOCALL placeholder, otherwise cyan.
+    // red if it's the NOCALL placeholder, otherwise cyan. CAT/FREQ
+    // come from the radio_service snapshot polled in render() above.
     const bool no_callsign = nanojs8::config::is_default_callsign();
+    const bool radio_ok = (std::strcmp(cat_text_, "Disconnected") != 0 &&
+                            std::strcmp(cat_text_, "Error")        != 0);
+    const uint16_t cat_color  = radio_ok
+                                  ? (ptt_active_cached_ ? (uint16_t)TFT_RED
+                                                        : (uint16_t)TFT_GREEN)
+                                  : (uint16_t)TFT_DARKGREY;
+    const uint16_t freq_color = radio_ok ? (uint16_t)TFT_CYAN
+                                          : (uint16_t)TFT_DARKGREY;
     Row rows[] = {
         { "CALL ",  cfg.callsign,
             no_callsign ? (uint16_t)TFT_RED : (uint16_t)TFT_CYAN },
         { "GRID ",  cfg.grid,           TFT_CYAN     },
         { "GPS  ",  "No fix",           TFT_DARKGREY },
-        { "FREQ ",  "----",             TFT_DARKGREY },
-        { "CAT  ",  "Disconnected",     TFT_DARKGREY },
+        { "FREQ ",  freq_text_,         freq_color   },
+        { "CAT  ",  cat_text_,          cat_color    },
         { "INBOX", "0 unread",          TFT_DARKGREY },
     };
     constexpr size_t row_count = sizeof(rows) / sizeof(rows[0]);

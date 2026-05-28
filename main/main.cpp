@@ -1,28 +1,39 @@
-// NanoJS8 — main.cpp (Phase 1)
+// NanoJS8 — main.cpp (Phase 3a)
 //
 // Boot sequence:
 //   1. NVS init
 //   2. M5Cardputer init (display + keyboard enabled)
 //   3. Boot diagnostics to ESP_LOG (chip, DRAM, SD)
-//   4. Mount SD (informational in Phase 1; required from Phase 4)
+//   4. Mount SD (informational in Phase 3a; required from Phase 4)
 //   5. Splash screen for ~1.2 sec
-//   6. Load config from NVS (first-boot writes defaults)
-//   7. Hand off to the screen router (pinned to core 0) which renders
-//      the SETUP screen and processes keyboard input forever.
+//   6. Load config from NVS (first-boot writes defaults; v1/v2→v3 migrate)
+//   7. Optional radio_service::start() if config.radio_autostart is true
+//   8. Register console commands (radio start/stop/status, ptt on/off)
+//   9. Hand off to the screen router (pinned to core 0) which renders
+//      the active screen and processes keyboard input forever.
+//
+// Phase 3a USB topology:
+//   Console = UART0 on GPIO 1 (TX) / GPIO 2 (RX), accessed via Grove
+//             port and an external USB-UART cable. This frees the
+//             USB-C port for OTG host duty.
+//   USB host = USB-C port driven by the OTG controller; powered hub
+//              attached for the DigiRig + radio combination.
 //
 // References:
-//   - Mini-FT8 main.cpp (AG6AQ/N6HAN) — SD-mount sequence and pin map
+//   - Mini-FT8 main.cpp — UART0 console pattern + USB host install order
 //   - Build Specification §2.3 — pin map
 //   - Build Specification §11 — phase delivery plan
 
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "esp_chip_info.h"
 #include "esp_err.h"
 #include "esp_system.h"
+#include "esp_console.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
@@ -37,6 +48,7 @@
 #include "version.h"
 #include "config_store.h"
 #include "screen_router.h"
+#include "radio_service.h"
 
 static const char* TAG = "nanojs8";
 
@@ -169,6 +181,126 @@ static void ui_task(void* arg) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Console commands (Phase 3a — radio start/stop/status, ptt on/off)
+// ---------------------------------------------------------------------------
+//
+// The console runs on UART0 (GPIO 1 TX, GPIO 2 RX via Grove). Operators
+// connect a USB-UART cable to the Grove port to see logs and issue
+// commands while the USB-C port is occupied by the OTG host stack
+// talking to the DigiRig.
+
+static int cmd_radio(int argc, char** argv) {
+    if (argc < 2) {
+        std::printf("Usage: radio start | radio stop | radio status\n");
+        return 1;
+    }
+    if (std::strcmp(argv[1], "start") == 0) {
+        const esp_err_t err = nanojs8::radio::start();
+        if (err == ESP_OK) {
+            std::printf("Radio service starting...\n");
+            return 0;
+        }
+        std::printf("Radio start failed: %s\n", esp_err_to_name(err));
+        return 1;
+    }
+    if (std::strcmp(argv[1], "stop") == 0) {
+        const esp_err_t err = nanojs8::radio::stop();
+        std::printf("Radio stop: %s\n", esp_err_to_name(err));
+        return err == ESP_OK ? 0 : 1;
+    }
+    if (std::strcmp(argv[1], "status") == 0) {
+        nanojs8::radio::Snapshot snap;
+        nanojs8::radio::snapshot(&snap);
+        const char* st = "?";
+        switch (snap.status) {
+            case nanojs8::radio::Status::IDLE:        st = "IDLE";        break;
+            case nanojs8::radio::Status::ENUMERATING: st = "ENUMERATING"; break;
+            case nanojs8::radio::Status::CONNECTED:   st = "CONNECTED";   break;
+            case nanojs8::radio::Status::ERROR:       st = "ERROR";       break;
+        }
+        std::printf("status:     %s\n", st);
+        std::printf("profile:    %s (%s)\n", snap.profile_id, snap.display_name);
+        std::printf("status_txt: %s\n", snap.status_text);
+        std::printf("ptt:        %s\n", snap.ptt_active ? "ASSERTED" : "released");
+        std::printf("freq:       %lu Hz (supported=%d)\n",
+                    (unsigned long)snap.freq_hz, (int)snap.supports_freq);
+        std::printf("rx_frames:  %lu  rx_overruns: %lu\n",
+                    (unsigned long)snap.rx_frames_total,
+                    (unsigned long)snap.rx_overruns);
+        return 0;
+    }
+    std::printf("Unknown subcommand: %s\n", argv[1]);
+    return 1;
+}
+
+static int cmd_ptt(int argc, char** argv) {
+    if (argc < 2) {
+        std::printf("Usage: ptt on | ptt off\n");
+        return 1;
+    }
+    if (std::strcmp(argv[1], "on") == 0) {
+        const esp_err_t err = nanojs8::radio::ptt_on();
+        std::printf("ptt on: %s\n", esp_err_to_name(err));
+        return err == ESP_OK ? 0 : 1;
+    }
+    if (std::strcmp(argv[1], "off") == 0) {
+        const esp_err_t err = nanojs8::radio::ptt_off();
+        std::printf("ptt off: %s\n", esp_err_to_name(err));
+        return err == ESP_OK ? 0 : 1;
+    }
+    std::printf("Unknown subcommand: %s\n", argv[1]);
+    return 1;
+}
+
+static void register_console_commands() {
+    const esp_console_cmd_t cmd_radio_def = {
+        .command  = "radio",
+        .help     = "Radio service control: radio start | radio stop | radio status",
+        .hint     = nullptr,
+        .func     = &cmd_radio,
+        .argtable = nullptr,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd_radio_def));
+
+    const esp_console_cmd_t cmd_ptt_def = {
+        .command  = "ptt",
+        .help     = "PTT control: ptt on | ptt off",
+        .hint     = nullptr,
+        .func     = &cmd_ptt,
+        .argtable = nullptr,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd_ptt_def));
+}
+
+// Console task — runs the REPL in its own task so app_main can return.
+// The REPL uses UART0 (the console we configured in sdkconfig).
+static void start_console_repl() {
+    esp_console_repl_t* repl = nullptr;
+    esp_console_repl_config_t repl_cfg = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
+    repl_cfg.prompt          = "nanojs8> ";
+    repl_cfg.max_cmdline_length = 128;
+
+    esp_console_dev_uart_config_t uart_cfg = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
+    // The pin / baud values are picked up from sdkconfig
+    // (CONFIG_ESP_CONSOLE_UART_TX_GPIO, CONFIG_ESP_CONSOLE_UART_RX_GPIO,
+    //  CONFIG_ESP_CONSOLE_UART_BAUDRATE). We don't override them here.
+
+    esp_err_t err = esp_console_new_repl_uart(&uart_cfg, &repl_cfg, &repl);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_console_new_repl_uart failed: %s", esp_err_to_name(err));
+        return;
+    }
+
+    register_console_commands();
+
+    esp_console_register_help_command();
+    err = esp_console_start_repl(repl);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_console_start_repl failed: %s", esp_err_to_name(err));
+    }
+}
+
 extern "C" void app_main(void) {
     ESP_LOGI(TAG, "================================================");
     ESP_LOGI(TAG, " NanoJS8 v%s  -  %s", NANOJS8_VERSION, NANOJS8_VERSION_PHASE);
@@ -218,6 +350,24 @@ extern "C" void app_main(void) {
                   chip_info.revision / 100,
                   chip_info.revision % 100);
     vTaskDelay(pdMS_TO_TICKS(1200));
+
+    // Phase 3a: optionally auto-start the radio service per NVS flag.
+    // Defaults OFF so a fresh boot behaves like Phase 0/1/2.
+    if (nanojs8::config::current().radio_autostart) {
+        ESP_LOGI(TAG, "radio_autostart=on; starting radio service");
+        const esp_err_t rerr = nanojs8::radio::start();
+        if (rerr != ESP_OK) {
+            ESP_LOGW(TAG, "radio_service::start at boot returned: %s "
+                          "(operator can retry with `radio start`)",
+                     esp_err_to_name(rerr));
+        }
+    } else {
+        ESP_LOGI(TAG, "radio_autostart=off; use `radio start` to enable");
+    }
+
+    // Start the serial console REPL. Lives on UART0 / Grove. Operators
+    // connect a USB-UART cable to issue `radio start`, `ptt on`, etc.
+    start_console_repl();
 
     // Hand off to the UI task on core 0 (where ESP-IDF's main_task also
     // runs by default; matches Mini-FT8's pinning). Stack 8 KB is

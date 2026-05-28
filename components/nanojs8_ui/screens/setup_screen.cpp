@@ -26,8 +26,8 @@ namespace layout {
 
     constexpr int HEADER_Y      = 4;
     constexpr int HEADER_H      = 16;
-    constexpr int FIELDS_Y      = 32;
-    constexpr int FIELD_ROW_H   = 18;
+    constexpr int FIELDS_Y      = 28;
+    constexpr int FIELD_ROW_H   = 16;
     constexpr int LABEL_X       = 12;
     constexpr int VALUE_X       = 80;
     constexpr int FOCUS_MARKER_X = 2;
@@ -49,6 +49,7 @@ static const char* FIELD_LABELS[] = {
     "GRID  ",
     "RADIO ",
     "GROUPS",
+    "AUTOST",   // "Auto-start radio service on boot" - truncated to fit 6-char column
 };
 
 // Pull current millis (no overflow concern over our use window).
@@ -63,11 +64,12 @@ static uint32_t now_ms() {
 // "no more room" feedback.)
 static uint8_t field_max_len(SetupScreen::Field f) {
     switch (f) {
-        case SetupScreen::Field::CALL:   return NANOJS8_CALLSIGN_MAXLEN - 1;
-        case SetupScreen::Field::GRID:   return NANOJS8_GRID_MAXLEN     - 1;
-        case SetupScreen::Field::RADIO:  return NANOJS8_RADIO_MAXLEN    - 1;
-        case SetupScreen::Field::GROUPS: return NANOJS8_GROUPS_MAXLEN   - 1;
-        case SetupScreen::Field::COUNT:  break;
+        case SetupScreen::Field::CALL:      return NANOJS8_CALLSIGN_MAXLEN - 1;
+        case SetupScreen::Field::GRID:      return NANOJS8_GRID_MAXLEN     - 1;
+        case SetupScreen::Field::RADIO:     return NANOJS8_RADIO_MAXLEN    - 1;
+        case SetupScreen::Field::GROUPS:    return NANOJS8_GROUPS_MAXLEN   - 1;
+        case SetupScreen::Field::AUTOSTART: return 3;  // "on" or "off"
+        case SetupScreen::Field::COUNT:     break;
     }
     return 19;
 }
@@ -76,11 +78,12 @@ static uint8_t field_max_len(SetupScreen::Field f) {
 static const char* committed_value(SetupScreen::Field f) {
     const Config& cfg = nanojs8::config::current();
     switch (f) {
-        case SetupScreen::Field::CALL:   return cfg.callsign;
-        case SetupScreen::Field::GRID:   return cfg.grid;
-        case SetupScreen::Field::RADIO:  return cfg.radio;
-        case SetupScreen::Field::GROUPS: return cfg.groups;
-        case SetupScreen::Field::COUNT:  break;
+        case SetupScreen::Field::CALL:      return cfg.callsign;
+        case SetupScreen::Field::GRID:      return cfg.grid;
+        case SetupScreen::Field::RADIO:     return cfg.radio;
+        case SetupScreen::Field::GROUPS:    return cfg.groups;
+        case SetupScreen::Field::AUTOSTART: return cfg.radio_autostart ? "on" : "off";
+        case SetupScreen::Field::COUNT:     break;
     }
     return "";
 }
@@ -94,6 +97,12 @@ static bool try_commit_field(SetupScreen::Field f, const char* draft) {
         case SetupScreen::Field::GRID:   return set_grid(draft)     == ESP_OK;
         case SetupScreen::Field::RADIO:  return set_radio(draft)    == ESP_OK;
         case SetupScreen::Field::GROUPS: return set_groups(draft)   == ESP_OK;
+        case SetupScreen::Field::AUTOSTART:
+            // The menu cycle already constrains draft to "on" or "off";
+            // any other value is a bug.
+            if (draft && std::strcmp(draft, "on") == 0)  return set_radio_autostart(true)  == ESP_OK;
+            if (draft && std::strcmp(draft, "off") == 0) return set_radio_autostart(false) == ESP_OK;
+            return false;
         case SetupScreen::Field::COUNT:  break;
     }
     return false;
@@ -142,7 +151,7 @@ bool SetupScreen::is_editing_text() const {
 // -------------------------------------------------------------------------
 
 bool SetupScreen::field_is_menu(Field f) const {
-    return f == Field::RADIO;
+    return f == Field::RADIO || f == Field::AUTOSTART;
 }
 
 void SetupScreen::enter_edit_mode() {
@@ -228,6 +237,17 @@ void SetupScreen::cycle_radio_option(bool forward) {
     needs_full_redraw_ = true;
 }
 
+void SetupScreen::cycle_autostart_option(bool forward) {
+    // Boolean toggle. Direction is irrelevant — both UP and DOWN flip.
+    (void)forward;
+    const bool was_on = (std::strcmp(edit_buf_, "on") == 0);
+    const char* next = was_on ? "off" : "on";
+    const size_t newlen = std::strlen(next);
+    std::memcpy(edit_buf_, next, newlen + 1);  // include NUL
+    edit_len_ = (uint8_t)newlen;
+    needs_full_redraw_ = true;
+}
+
 bool SetupScreen::save_all() {
     esp_err_t err = nanojs8::config::save();
     if (err == ESP_OK) {
@@ -285,26 +305,33 @@ bool SetupScreen::handle_event(const InputEvent& ev) {
 
     // Mode::EDIT
     if (field_is_menu(focus_)) {
-        // Menu field — RADIO. UP/DOWN cycle options, Enter commits,
-        // Esc cancels. Typed chars ignored.
+        // Menu field — RADIO or AUTOSTART. UP/DOWN cycle options,
+        // Enter commits, Esc cancels. Typed chars ignored.
         // Bare semicolon and period as UP/DOWN aliases. The Cardputer
         // ADV has no physical arrow keys; in MicroJS8's UART firmware
         // these chars map to UP/DOWN events. Mirror that here for
         // menu-field editing so the operator doesn't need to hold Fn.
+        auto cycle = [this](bool forward) {
+            if (focus_ == Field::RADIO) {
+                cycle_radio_option(forward);
+            } else if (focus_ == Field::AUTOSTART) {
+                cycle_autostart_option(forward);
+            }
+        };
         if (ev.ch == ';') {
-            cycle_radio_option(false);  // ';' = up
+            cycle(false);  // ';' = up
             return true;
         }
         if (ev.ch == '.') {
-            cycle_radio_option(true);   // '.' = down
+            cycle(true);   // '.' = down
             return true;
         }
         switch (ev.key) {
             case Key::UP:
-                cycle_radio_option(false);
+                cycle(false);
                 return true;
             case Key::DOWN:
-                cycle_radio_option(true);
+                cycle(true);
                 return true;
             case Key::ENTER:
                 commit_edit_mode();

@@ -27,7 +27,8 @@
 // Version history:
 //   v1 (Phase 1) — callsign, grid, radio
 //   v2 (Phase 2) — added groups field
-#define NANOJS8_CONFIG_VERSION 2
+//   v3 (Phase 3a) — added radio_autostart bool (auto-start radio service on boot)
+#define NANOJS8_CONFIG_VERSION 3
 
 // Field length limits, including the null terminator. These match the
 // physical SETUP screen layout (240×135 with the chosen font) and the
@@ -85,6 +86,13 @@ extern const size_t      NANOJS8_RADIO_PROFILES_COUNT;
 #define NANOJS8_DEFAULT_RADIO    "qdx"
 #define NANOJS8_DEFAULT_GROUPS   ""
 
+// v3+: radio autostart. When true, main() calls radio_service::start()
+// after config load. When false (default), the operator must run the
+// `radio start` serial command. The default is intentionally OFF so a
+// fresh device boots into the same state Phase 0/1/2 firmware booted
+// into — no surprise USB activity.
+#define NANOJS8_DEFAULT_RADIO_AUTOSTART false
+
 // The Config struct. Plain-old-data so it can be memcpy'd or zero-init'd
 // without ceremony. All strings are NUL-terminated, fixed-size arrays
 // rather than std::string — std::string's heap behavior is unwanted on
@@ -95,4 +103,5 @@ struct Config {
     char     grid    [NANOJS8_GRID_MAXLEN];
     char     radio   [NANOJS8_RADIO_MAXLEN];
     char     groups  [NANOJS8_GROUPS_MAXLEN];      // v2+: "@A,@B,@C" or empty
+    bool     radio_autostart;                      // v3+: auto-start radio service on boot
 };

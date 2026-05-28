@@ -8,16 +8,17 @@
 //   +----------------------------------------+
 //   | SETUP                              v0.1|  ← header
 //   |                                        |
-//   |   CALL :  W5DMH                        |  ← field rows
-//   |   GRID :  EM10                         |
-//   |   RADIO:  qdx                          |
-//   |                                        |
+//   |   CALL  :  W5DMH                       |  ← field rows
+//   |   GRID  :  EM10                        |
+//   |   RADIO :  digirig_unknown             |
+//   |   GROUPS:  @FT8,@HF                    |
+//   |   AUTOST:  off                         |  ← v3+: radio autostart
 //   |                                        |
 //   | Tab next · Enter edit · ^S save        |  ← footer hint
 //   +----------------------------------------+
 //
 // One field is highlighted as "focused" at any time. Tab moves focus
-// forward through CALL → GRID → RADIO → CALL (wraps).
+// forward through CALL → GRID → RADIO → GROUPS → AUTOSTART → CALL (wraps).
 //
 // State machine within the screen:
 //   NAV mode:  focused field shown with a marker. Tab/UP/DOWN navigate.
@@ -58,10 +59,11 @@ public:
 public:
     // Field identity. Order here is Tab cycle order on the screen.
     enum class Field : uint8_t {
-        CALL   = 0,
-        GRID   = 1,
-        RADIO  = 2,
-        GROUPS = 3,
+        CALL      = 0,
+        GRID      = 1,
+        RADIO     = 2,
+        GROUPS    = 3,
+        AUTOSTART = 4,  // v3+: ON/OFF menu-cycle, controls radio_service::start at boot
         COUNT
     };
 
@@ -89,7 +91,8 @@ public:
     void commit_edit_mode();      // tries to commit; sets show_error_ on fail
     void cancel_edit_mode();      // reverts edit_buf_, returns to NAV
     void cycle_focus_forward();   // Tab handler
-    void cycle_radio_option(bool forward);  // UP/DOWN in RADIO field
+    void cycle_radio_option(bool forward);     // UP/DOWN in RADIO field
+    void cycle_autostart_option(bool forward); // UP/DOWN in AUTOSTART field
     bool field_is_menu(Field f) const;
     bool save_all();              // Ctrl+S handler. Returns success.
 

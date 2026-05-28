@@ -37,11 +37,12 @@ static const char* NVS_NAMESPACE = "nanojs8";
 // NVS key names. All deliberately short — NVS keys are 15 chars max.
 // "v" is intentional: it's used in every load() and a single byte saves
 // log noise when dumping the namespace contents.
-static const char* KEY_VERSION  = "v";
-static const char* KEY_CALLSIGN = "call";
-static const char* KEY_GRID     = "grid";
-static const char* KEY_RADIO    = "radio";
-static const char* KEY_GROUPS   = "groups";
+static const char* KEY_VERSION   = "v";
+static const char* KEY_CALLSIGN  = "call";
+static const char* KEY_GRID      = "grid";
+static const char* KEY_RADIO     = "radio";
+static const char* KEY_GROUPS    = "groups";
+static const char* KEY_AUTOSTART = "rauto";   // v3+: radio autostart bool
 
 
 
@@ -77,6 +78,7 @@ static void apply_defaults() {
     safe_strcpy(s_current.grid,     sizeof(s_current.grid),     NANOJS8_DEFAULT_GRID);
     safe_strcpy(s_current.radio,    sizeof(s_current.radio),    NANOJS8_DEFAULT_RADIO);
     safe_strcpy(s_current.groups,   sizeof(s_current.groups),   NANOJS8_DEFAULT_GROUPS);
+    s_current.radio_autostart = NANOJS8_DEFAULT_RADIO_AUTOSTART;
 }
 
 // -------------------------------------------------------------------------
@@ -286,6 +288,11 @@ esp_err_t set_groups(const char* value) {
     return ESP_OK;
 }
 
+esp_err_t set_radio_autostart(bool value) {
+    s_current.radio_autostart = value;
+    return ESP_OK;
+}
+
 // -------------------------------------------------------------------------
 // load / save
 // -------------------------------------------------------------------------
@@ -318,18 +325,21 @@ esp_err_t load() {
         return err;
     }
 
-    // Migration handling. v1 → v2 added the groups field; we preserve
-    // the existing callsign/grid/radio and default groups to empty.
+    // Migration handling. Each shape change preserves what it can:
+    //   v1 → v3: read CALL/GRID/RADIO, default GROUPS empty and
+    //            radio_autostart OFF
+    //   v2 → v3: read CALL/GRID/RADIO/GROUPS, default radio_autostart OFF
     // Other version mismatches (future schemas we don't understand,
     // corruption) fall through to a default-and-rewrite.
     bool needs_migration_save = false;
-    if (persisted_version == 1 && NANOJS8_CONFIG_VERSION == 2) {
-        ESP_LOGI(TAG, "Migrating config v1 → v2 (preserving CALL/GRID/RADIO, "
-                      "defaulting GROUPS to empty)");
+    if (persisted_version == 1 && NANOJS8_CONFIG_VERSION == 3) {
+        ESP_LOGI(TAG, "Migrating config v1 → v3 (preserving CALL/GRID/RADIO, "
+                      "defaulting GROUPS empty and AUTOSTART off)");
         needs_migration_save = true;
-        // Read happens below; we just flag a save() at the end. The
-        // groups field will be missing from NVS and the read_str
-        // helper below will fill in the default.
+    } else if (persisted_version == 2 && NANOJS8_CONFIG_VERSION == 3) {
+        ESP_LOGI(TAG, "Migrating config v2 → v3 (preserving CALL/GRID/RADIO/"
+                      "GROUPS, defaulting AUTOSTART off)");
+        needs_migration_save = true;
     } else if (persisted_version != NANOJS8_CONFIG_VERSION) {
         ESP_LOGW(TAG, "Config version mismatch (on-disk=%u, code=%u); resetting to defaults",
                  (unsigned)persisted_version, (unsigned)NANOJS8_CONFIG_VERSION);
@@ -373,11 +383,26 @@ esp_err_t load() {
     read_str(KEY_RADIO,    s_current.radio,    sizeof(s_current.radio),    NANOJS8_DEFAULT_RADIO);
     read_str(KEY_GROUPS,   s_current.groups,   sizeof(s_current.groups),   NANOJS8_DEFAULT_GROUPS);
 
+    // Read radio_autostart. Stored as u8. Missing key → use default
+    // (which is also what happens during v1/v2 → v3 migration).
+    uint8_t autostart_u8 = NANOJS8_DEFAULT_RADIO_AUTOSTART ? 1 : 0;
+    esp_err_t e_auto = nvs_get_u8(handle, KEY_AUTOSTART, &autostart_u8);
+    if (e_auto == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(TAG, "key %s not found, using default (%s)", KEY_AUTOSTART,
+                 NANOJS8_DEFAULT_RADIO_AUTOSTART ? "on" : "off");
+        autostart_u8 = NANOJS8_DEFAULT_RADIO_AUTOSTART ? 1 : 0;
+    } else if (e_auto != ESP_OK) {
+        ESP_LOGW(TAG, "nvs_get_u8(%s) failed: %s — using default",
+                 KEY_AUTOSTART, esp_err_to_name(e_auto));
+    }
+    s_current.radio_autostart = (autostart_u8 != 0);
+
     nvs_close(handle);
 
-    // Flush after migration so the next boot finds v2 layout. The
-    // existing callsign/grid/radio values are preserved; only the
-    // version field and the new groups key (empty) are written.
+    // Flush after migration so the next boot finds v3 layout. The
+    // existing callsign/grid/radio/groups values are preserved; only
+    // the version field and the new keys (autostart, and groups if
+    // migrating from v1) are written.
     if (needs_migration_save) {
         return save();
     }
@@ -401,6 +426,7 @@ esp_err_t save() {
     if (err == ESP_OK) err = nvs_set_str(handle, KEY_GRID,     s_current.grid);
     if (err == ESP_OK) err = nvs_set_str(handle, KEY_RADIO,    s_current.radio);
     if (err == ESP_OK) err = nvs_set_str(handle, KEY_GROUPS,   s_current.groups);
+    if (err == ESP_OK) err = nvs_set_u8 (handle, KEY_AUTOSTART, s_current.radio_autostart ? 1 : 0);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "save: nvs_set failed: %s", esp_err_to_name(err));
         nvs_close(handle);
@@ -414,9 +440,10 @@ esp_err_t save() {
         return err;
     }
     nvs_close(handle);
-    ESP_LOGI(TAG, "Config saved (call=%s grid=%s radio=%s groups=%s)",
+    ESP_LOGI(TAG, "Config saved (call=%s grid=%s radio=%s groups=%s autostart=%s)",
              s_current.callsign, s_current.grid, s_current.radio,
-             s_current.groups[0] ? s_current.groups : "(none)");
+             s_current.groups[0] ? s_current.groups : "(none)",
+             s_current.radio_autostart ? "on" : "off");
     return ESP_OK;
 }
 
@@ -430,10 +457,11 @@ const Config& current() {
 
 void log_current() {
     ESP_LOGI(TAG, "Current config (v%u):", (unsigned)s_current.version);
-    ESP_LOGI(TAG, "  callsign: %s", s_current.callsign);
-    ESP_LOGI(TAG, "  grid:     %s", s_current.grid);
-    ESP_LOGI(TAG, "  radio:    %s", s_current.radio);
-    ESP_LOGI(TAG, "  groups:   %s", s_current.groups[0] ? s_current.groups : "(none)");
+    ESP_LOGI(TAG, "  callsign:  %s", s_current.callsign);
+    ESP_LOGI(TAG, "  grid:      %s", s_current.grid);
+    ESP_LOGI(TAG, "  radio:     %s", s_current.radio);
+    ESP_LOGI(TAG, "  groups:    %s", s_current.groups[0] ? s_current.groups : "(none)");
+    ESP_LOGI(TAG, "  autostart: %s", s_current.radio_autostart ? "on" : "off");
 }
 
 bool is_default_callsign() {
