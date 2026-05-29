@@ -73,6 +73,11 @@ esp_err_t set_groups  (const char* value);
 // beyond the type. Persisted as nvs uint8 (0 or 1).
 esp_err_t set_radio_autostart(bool value);
 
+// Phase 3.5 v4 — power management settings. Clamped to sane ranges.
+esp_err_t set_idle_dim_sec(uint16_t value);
+esp_err_t set_idle_off_sec(uint16_t value);
+esp_err_t set_dim_brightness(uint8_t value);
+
 // Validation helpers — exposed so the SETUP screen can re-check a draft
 // value at character-insertion time (live red-highlight as the user
 // types) without committing to current().

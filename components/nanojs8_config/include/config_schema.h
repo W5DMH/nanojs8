@@ -28,7 +28,8 @@
 //   v1 (Phase 1) — callsign, grid, radio
 //   v2 (Phase 2) — added groups field
 //   v3 (Phase 3a) — added radio_autostart bool (auto-start radio service on boot)
-#define NANOJS8_CONFIG_VERSION 3
+//   v4 (Phase 3.5) — added power mgmt: idle_dim_sec, idle_off_sec, dim_brightness
+#define NANOJS8_CONFIG_VERSION 4
 
 // Field length limits, including the null terminator. These match the
 // physical SETUP screen layout (240×135 with the chosen font) and the
@@ -93,6 +94,17 @@ extern const size_t      NANOJS8_RADIO_PROFILES_COUNT;
 // into — no surprise USB activity.
 #define NANOJS8_DEFAULT_RADIO_AUTOSTART false
 
+// v4+: power management (Phase 3.5).
+//   idle_dim_sec   — seconds idle before the screen dims (0 = disabled)
+//   idle_off_sec   — seconds idle before the screen blanks (0 = disabled)
+//   dim_brightness — backlight percent (0-100) while dimmed
+// Defaults: dim at 2 min, blank at 5 min, dim to 30%. Tuned for field
+// battery saving without being annoying during active use. Blanking is
+// display-only and never interrupts the radio service.
+#define NANOJS8_DEFAULT_IDLE_DIM_SEC   120
+#define NANOJS8_DEFAULT_IDLE_OFF_SEC   300
+#define NANOJS8_DEFAULT_DIM_BRIGHTNESS 30
+
 // The Config struct. Plain-old-data so it can be memcpy'd or zero-init'd
 // without ceremony. All strings are NUL-terminated, fixed-size arrays
 // rather than std::string — std::string's heap behavior is unwanted on
@@ -104,4 +116,7 @@ struct Config {
     char     radio   [NANOJS8_RADIO_MAXLEN];
     char     groups  [NANOJS8_GROUPS_MAXLEN];      // v2+: "@A,@B,@C" or empty
     bool     radio_autostart;                      // v3+: auto-start radio service on boot
+    uint16_t idle_dim_sec;                         // v4+: idle seconds before dim (0=off)
+    uint16_t idle_off_sec;                         // v4+: idle seconds before blank (0=off)
+    uint8_t  dim_brightness;                        // v4+: backlight % when dimmed
 };

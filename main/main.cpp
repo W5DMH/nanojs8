@@ -49,6 +49,7 @@
 #include "config_store.h"
 #include "screen_router.h"
 #include "radio_service.h"
+#include "power_manager.h"
 
 static const char* TAG = "nanojs8";
 
@@ -259,6 +260,71 @@ static int cmd_ptt(int argc, char** argv) {
     return 1;
 }
 
+// charge [on|off] — enter/exit charge mode. No arg toggles.
+static int cmd_charge(int argc, char** argv) {
+    if (argc < 2) {
+        // Toggle.
+        if (nanojs8::power::in_charge_mode()) {
+            nanojs8::power::exit_charge_mode();
+            std::printf("charge mode: OFF\n");
+        } else {
+            nanojs8::power::enter_charge_mode();
+            std::printf("charge mode: ON (screen off; any key or `charge off` to exit)\n");
+        }
+        return 0;
+    }
+    if (std::strcmp(argv[1], "on") == 0) {
+        nanojs8::power::enter_charge_mode();
+        std::printf("charge mode: ON (screen off; any key or `charge off` to exit)\n");
+        return 0;
+    }
+    if (std::strcmp(argv[1], "off") == 0) {
+        nanojs8::power::exit_charge_mode();
+        std::printf("charge mode: OFF\n");
+        return 0;
+    }
+    std::printf("Usage: charge | charge on | charge off\n");
+    return 1;
+}
+
+// power — show/adjust power settings.
+static int cmd_power(int argc, char** argv) {
+    if (argc < 2) {
+        nanojs8::power::Snapshot ps;
+        nanojs8::power::snapshot(&ps);
+        const nanojs8::power::Settings& s = nanojs8::power::settings();
+        const char* lvl = "NORMAL";
+        if (ps.level == nanojs8::power::Level::LOW)      lvl = "LOW";
+        if (ps.level == nanojs8::power::Level::CRITICAL) lvl = "CRITICAL";
+        std::printf("battery:     %d%% (%d mV) [%s]\n", ps.battery_pct, ps.battery_mv, lvl);
+        std::printf("charge_mode: %s\n", ps.in_charge_mode ? "ON" : "off");
+        std::printf("screen:      %d (0=full 1=dim 2=blank 3=charge)\n", (int)ps.screen_state);
+        std::printf("idle:        %us\n", (unsigned)ps.idle_sec);
+        std::printf("idle_dim:    %us  idle_off: %us  dim_bright: %u%%\n",
+                    (unsigned)s.idle_dim_sec, (unsigned)s.idle_off_sec,
+                    (unsigned)s.dim_brightness);
+        std::printf("Set: power dim <sec> | power off <sec> | power bright <pct>  (0 disables timeout)\n");
+        return 0;
+    }
+    if (argc >= 3 && std::strcmp(argv[1], "dim") == 0) {
+        nanojs8::power::set_idle_dim_sec((uint16_t)atoi(argv[2]));
+        std::printf("idle_dim set to %s s (saved)\n", argv[2]);
+        return 0;
+    }
+    if (argc >= 3 && std::strcmp(argv[1], "off") == 0) {
+        nanojs8::power::set_idle_off_sec((uint16_t)atoi(argv[2]));
+        std::printf("idle_off set to %s s (saved)\n", argv[2]);
+        return 0;
+    }
+    if (argc >= 3 && std::strcmp(argv[1], "bright") == 0) {
+        nanojs8::power::set_dim_brightness((uint8_t)atoi(argv[2]));
+        std::printf("dim_brightness set to %s%% (saved)\n", argv[2]);
+        return 0;
+    }
+    std::printf("Usage: power | power dim <sec> | power off <sec> | power bright <pct>\n");
+    return 1;
+}
+
 static void register_console_commands() {
     const esp_console_cmd_t cmd_radio_def = {
         .command  = "radio",
@@ -277,6 +343,24 @@ static void register_console_commands() {
         .argtable = nullptr,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&cmd_ptt_def));
+
+    const esp_console_cmd_t cmd_charge_def = {
+        .command  = "charge",
+        .help     = "Charge mode (screen off for faster charging): charge | charge on | charge off",
+        .hint     = nullptr,
+        .func     = &cmd_charge,
+        .argtable = nullptr,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd_charge_def));
+
+    const esp_console_cmd_t cmd_power_def = {
+        .command  = "power",
+        .help     = "Power status/settings: power | power dim <sec> | power off <sec> | power bright <pct>",
+        .hint     = nullptr,
+        .func     = &cmd_power,
+        .argtable = nullptr,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd_power_def));
 }
 
 // Console task — runs the REPL in its own task so app_main can return.
@@ -372,6 +456,12 @@ extern "C" void app_main(void) {
                   chip_info.revision / 100,
                   chip_info.revision % 100);
     vTaskDelay(pdMS_TO_TICKS(1200));
+
+    // Phase 3.5: initialize the power management subsystem. Must come
+    // after M5Cardputer.begin() (needs display + battery drivers) and
+    // after config load (reads idle/dim settings from NVS). Starts the
+    // battery monitor task and idle-screen management.
+    nanojs8::power::init();
 
     // Phase 3a: optionally auto-start the radio service per NVS flag.
     // Defaults OFF so a fresh boot behaves like Phase 0/1/2.

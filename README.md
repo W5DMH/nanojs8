@@ -7,15 +7,19 @@ ESP32-S3 platform in ESP-IDF / FreeRTOS / C++. It replicates MicroJS8's screen
 ring, protocol grammar, and operating ergonomics on a pocket-sized device with
 a built-in keyboard and display.
 
-**Status: Phase 3a - DigiRig + RTS-PTT.** USB host (OTG) live for the
-Cardputer ADV's USB-C port. The firmware enumerates DigiRig (audio side
-via UAC, control side via CP2102 CDC-ACM) and asserts the radio's PTT via
-the CP2102 RTS line. HOME now shows live CAT status from the radio
-service. SETUP gains an AUTOSTART toggle that controls whether the radio
-service starts at boot. Console relocated to UART0 on the Grove port
-(GPIO 1 TX / GPIO 2 RX) so the USB-C port is free for OTG host duty;
-external USB-UART cable required for `idf.py monitor` and the new serial
-commands. See [Build Specification §11](docs/) for the phased delivery plan.
+**Status: Phase 3.5 - Power Management.** Adds a dedicated power
+subsystem on top of Phase 3a: smoothed battery telemetry (shown on HOME
+and via `radio status`/`power`), a charge mode (Ctrl+C on the keyboard or
+`charge` over serial) that turns the screen off so the battery actually
+charges at a usable rate, idle screen dimming/blanking to save power in
+the field, and low/critical-battery load shedding. NVS schema migrated
+v3 → v4 (idle timeouts + dim level). See "Power management" below for the
+hardware reality of charging this device.
+
+Phase 3a (DigiRig + RTS-PTT) remains: USB host enumerates the DigiRig
+(UAC audio + CP2102 serial), asserts PTT via the CP2102 RTS line, and
+HOME shows live radio status. Console is on UART0/Grove. See
+[Build Specification §11](docs/) for the phased delivery plan.
 
 **License: GPL-3.0.** Inherits from gfsk8-modem-clean (jfrancis42) and
 MicroJS8 lineage.
@@ -80,7 +84,64 @@ To exit `monitor`: `Ctrl+]`.
 
 ---
 
-## Phase 3a hardware setup
+## Power management
+
+NanoJS8 is a dedicated-firmware appliance, so it owns power and charge
+management itself (there's no launcher underneath). The Cardputer ADV has
+two hardware realities that shape this:
+
+**1. Charging is slow by design.** The charge IC pulls only ~300 mA from
+USB regardless of the supply (a 2.5 A power bank doesn't charge it any
+faster). Whatever the running firmware consumes is subtracted from that,
+so with the screen on, almost nothing reaches the battery. The fix is
+**Charge Mode**, which turns the screen off so the bulk of the ~300 mA
+goes to the cell.
+
+- Enter Charge Mode: **Ctrl+C** on the Cardputer keyboard, or `charge`
+  over the serial console. Screen goes off; the device keeps charging.
+- Exit: **any keypress**, or `charge off` over serial.
+- Expect roughly 6-8 hours for a full charge in Charge Mode (vs. ~28 hrs,
+  or never, with the screen on). This is a hardware limit, not a bug.
+- The power switch must be **ON** to charge (per M5Stack).
+
+**2. The single USB-C port can't host a radio and charge at the same
+time.** During radio operation the USB-C port is busy driving the DigiRig
+as a USB host, so it can't also accept charge power. For extended radio
+sessions, use a **powered USB hub** or a **power-injecting Y-cable** so
+the DigiRig (and the Cardputer) get external 5 V. On battery alone, a USB
+radio interface will drain the cell.
+
+### Battery telemetry
+
+Battery percentage shows in the upper-right corner of HOME, color-coded:
+green (normal), amber (≤20%), red (≤10%). The `power` serial command
+shows detail (voltage, level, charge mode, idle state, settings), and
+`radio status` includes a battery line.
+
+### Idle screen management
+
+To save power in the field, the screen dims after a period of no
+keypresses and blanks after a longer period. Any keypress restores full
+brightness. Blanking is display-only — it never interrupts the radio
+service, so an unattended receive session keeps running with the screen
+off. Defaults: dim at 2 min, blank at 5 min. Adjust over serial:
+
+```
+power dim <sec>      # seconds idle before dimming (0 disables)
+power off <sec>      # seconds idle before blanking (0 disables)
+power bright <pct>   # backlight percent when dimmed
+```
+
+Settings persist in NVS (schema v4).
+
+### Low / critical battery
+
+At ≤20% (LOW) the HOME indicator turns amber and a warning is logged. At
+≤10% (CRITICAL) the indicator turns red and the radio service is stopped
+to shed load and protect the cell. No forced shutdown — the operator
+stays in control; the device just stops the biggest power draw and warns.
+
+
 
 Phase 3a uses the USB-C port for **OTG host duty** (talking to a DigiRig and
 its attached radio). That means the console must move off USB-Serial-JTAG. The

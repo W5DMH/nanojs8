@@ -35,6 +35,7 @@ enum class Key : uint8_t {
     CTRL_S,          // Save all to NVS
     CTRL_Q,          // Quit (unused on embedded; reserved for parity with MicroJS8)
     CTRL_H,          // Help (unused in Phase 1; reserved)
+    CTRL_C,          // Enter charge mode (Phase 3.5 power management)
 };
 
 // One input event. Exactly one of `key != NONE` or `ch != 0` is true.

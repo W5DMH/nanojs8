@@ -43,6 +43,9 @@ static const char* KEY_GRID      = "grid";
 static const char* KEY_RADIO     = "radio";
 static const char* KEY_GROUPS    = "groups";
 static const char* KEY_AUTOSTART = "rauto";   // v3+: radio autostart bool
+static const char* KEY_IDLE_DIM  = "idim";    // v4+: idle dim seconds
+static const char* KEY_IDLE_OFF  = "ioff";    // v4+: idle blank seconds
+static const char* KEY_DIM_BRT   = "dbrt";    // v4+: dim brightness %
 
 
 
@@ -79,6 +82,9 @@ static void apply_defaults() {
     safe_strcpy(s_current.radio,    sizeof(s_current.radio),    NANOJS8_DEFAULT_RADIO);
     safe_strcpy(s_current.groups,   sizeof(s_current.groups),   NANOJS8_DEFAULT_GROUPS);
     s_current.radio_autostart = NANOJS8_DEFAULT_RADIO_AUTOSTART;
+    s_current.idle_dim_sec    = NANOJS8_DEFAULT_IDLE_DIM_SEC;
+    s_current.idle_off_sec    = NANOJS8_DEFAULT_IDLE_OFF_SEC;
+    s_current.dim_brightness  = NANOJS8_DEFAULT_DIM_BRIGHTNESS;
 }
 
 // -------------------------------------------------------------------------
@@ -293,6 +299,25 @@ esp_err_t set_radio_autostart(bool value) {
     return ESP_OK;
 }
 
+esp_err_t set_idle_dim_sec(uint16_t value) {
+    // 0 = disabled, else clamp to a sane max (1 hour).
+    if (value > 3600) value = 3600;
+    s_current.idle_dim_sec = value;
+    return ESP_OK;
+}
+
+esp_err_t set_idle_off_sec(uint16_t value) {
+    if (value > 3600) value = 3600;
+    s_current.idle_off_sec = value;
+    return ESP_OK;
+}
+
+esp_err_t set_dim_brightness(uint8_t value) {
+    if (value > 100) value = 100;
+    s_current.dim_brightness = value;
+    return ESP_OK;
+}
+
 // -------------------------------------------------------------------------
 // load / save
 // -------------------------------------------------------------------------
@@ -325,28 +350,32 @@ esp_err_t load() {
         return err;
     }
 
-    // Migration handling. Each shape change preserves what it can:
-    //   v1 → v3: read CALL/GRID/RADIO, default GROUPS empty and
-    //            radio_autostart OFF
-    //   v2 → v3: read CALL/GRID/RADIO/GROUPS, default radio_autostart OFF
-    // Other version mismatches (future schemas we don't understand,
-    // corruption) fall through to a default-and-rewrite.
+    // Migration handling — version-agnostic forward migration.
+    //
+    // Strategy: any persisted version from 1 up to the current schema
+    // is migrated forward by reading whatever keys exist and defaulting
+    // whatever doesn't. The per-key read helpers below already fall back
+    // to defaults when a key is absent, so adding fields across versions
+    // "just works": a v2 store migrating to v4 reads CALL/GRID/RADIO/
+    // GROUPS, and defaults radio_autostart (v3) + power settings (v4).
+    //
+    // Only a version NEWER than we understand, or an unreadable/corrupt
+    // store, triggers a full reset to defaults.
     bool needs_migration_save = false;
-    if (persisted_version == 1 && NANOJS8_CONFIG_VERSION == 3) {
-        ESP_LOGI(TAG, "Migrating config v1 → v3 (preserving CALL/GRID/RADIO, "
-                      "defaulting GROUPS empty and AUTOSTART off)");
+    if (persisted_version >= 1 && persisted_version < NANOJS8_CONFIG_VERSION) {
+        ESP_LOGI(TAG, "Migrating config v%u → v%u (preserving known fields, "
+                      "defaulting new ones)",
+                 (unsigned)persisted_version, (unsigned)NANOJS8_CONFIG_VERSION);
         needs_migration_save = true;
-    } else if (persisted_version == 2 && NANOJS8_CONFIG_VERSION == 3) {
-        ESP_LOGI(TAG, "Migrating config v2 → v3 (preserving CALL/GRID/RADIO/"
-                      "GROUPS, defaulting AUTOSTART off)");
-        needs_migration_save = true;
-    } else if (persisted_version != NANOJS8_CONFIG_VERSION) {
-        ESP_LOGW(TAG, "Config version mismatch (on-disk=%u, code=%u); resetting to defaults",
+    } else if (persisted_version > NANOJS8_CONFIG_VERSION) {
+        ESP_LOGW(TAG, "Config version %u is NEWER than this firmware (%u); "
+                      "resetting to defaults to avoid misreading unknown layout",
                  (unsigned)persisted_version, (unsigned)NANOJS8_CONFIG_VERSION);
         apply_defaults();
         nvs_close(handle);
         return save();
     }
+    // persisted_version == NANOJS8_CONFIG_VERSION: no migration needed.
 
     // Read each string field. nvs_get_str needs a length-probe first.
     auto read_str = [&handle](const char* key, char* dst, size_t dst_size,
@@ -397,6 +426,38 @@ esp_err_t load() {
     }
     s_current.radio_autostart = (autostart_u8 != 0);
 
+    // v4 power settings. Each defaults if its key is absent (e.g. when
+    // migrating a v1/v2/v3 store forward). Helper for u16 with default.
+    auto read_u16 = [&handle](const char* key, uint16_t def) -> uint16_t {
+        uint16_t v = def;
+        esp_err_t e = nvs_get_u16(handle, key, &v);
+        if (e == ESP_ERR_NVS_NOT_FOUND) {
+            ESP_LOGI(TAG, "key %s not found, using default %u", key, (unsigned)def);
+            return def;
+        }
+        if (e != ESP_OK) {
+            ESP_LOGW(TAG, "nvs_get_u16(%s) failed: %s — using default",
+                     key, esp_err_to_name(e));
+            return def;
+        }
+        return v;
+    };
+    s_current.idle_dim_sec = read_u16(KEY_IDLE_DIM, NANOJS8_DEFAULT_IDLE_DIM_SEC);
+    s_current.idle_off_sec = read_u16(KEY_IDLE_OFF, NANOJS8_DEFAULT_IDLE_OFF_SEC);
+
+    uint8_t dimb = NANOJS8_DEFAULT_DIM_BRIGHTNESS;
+    esp_err_t e_dimb = nvs_get_u8(handle, KEY_DIM_BRT, &dimb);
+    if (e_dimb == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(TAG, "key %s not found, using default %u", KEY_DIM_BRT,
+                 (unsigned)NANOJS8_DEFAULT_DIM_BRIGHTNESS);
+        dimb = NANOJS8_DEFAULT_DIM_BRIGHTNESS;
+    } else if (e_dimb != ESP_OK) {
+        ESP_LOGW(TAG, "nvs_get_u8(%s) failed: %s — using default",
+                 KEY_DIM_BRT, esp_err_to_name(e_dimb));
+    }
+    if (dimb > 100) dimb = 100;
+    s_current.dim_brightness = dimb;
+
     nvs_close(handle);
 
     // Flush after migration so the next boot finds v3 layout. The
@@ -427,6 +488,9 @@ esp_err_t save() {
     if (err == ESP_OK) err = nvs_set_str(handle, KEY_RADIO,    s_current.radio);
     if (err == ESP_OK) err = nvs_set_str(handle, KEY_GROUPS,   s_current.groups);
     if (err == ESP_OK) err = nvs_set_u8 (handle, KEY_AUTOSTART, s_current.radio_autostart ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_u16(handle, KEY_IDLE_DIM, s_current.idle_dim_sec);
+    if (err == ESP_OK) err = nvs_set_u16(handle, KEY_IDLE_OFF, s_current.idle_off_sec);
+    if (err == ESP_OK) err = nvs_set_u8 (handle, KEY_DIM_BRT,  s_current.dim_brightness);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "save: nvs_set failed: %s", esp_err_to_name(err));
         nvs_close(handle);
@@ -462,6 +526,10 @@ void log_current() {
     ESP_LOGI(TAG, "  radio:     %s", s_current.radio);
     ESP_LOGI(TAG, "  groups:    %s", s_current.groups[0] ? s_current.groups : "(none)");
     ESP_LOGI(TAG, "  autostart: %s", s_current.radio_autostart ? "on" : "off");
+    ESP_LOGI(TAG, "  idle_dim:  %us  idle_off: %us  dim_bright: %u%%",
+             (unsigned)s_current.idle_dim_sec,
+             (unsigned)s_current.idle_off_sec,
+             (unsigned)s_current.dim_brightness);
 }
 
 bool is_default_callsign() {

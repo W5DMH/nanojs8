@@ -21,6 +21,7 @@ idf_component_register(
         M5Cardputer
         nanojs8_config
         nanojs8_radio
+        nanojs8_power
         esp_timer
 )
 

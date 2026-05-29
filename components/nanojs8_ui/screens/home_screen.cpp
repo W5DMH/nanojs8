@@ -11,6 +11,7 @@
 
 #include "config_store.h"
 #include "radio_service.h"
+#include "power_manager.h"
 
 namespace nanojs8 {
 namespace ui {
@@ -149,6 +150,36 @@ void HomeScreen::draw_full() {
     d.setTextSize(2);
     d.setCursor(layout::HEADER_X, layout::HEADER_Y);
     d.printf("HOME");
+
+    // Battery indicator, upper-right corner. Color-coded by level:
+    // green normal, amber low (<=20%), red critical (<=10%). Small
+    // size-1 text so it fits beside the size-2 "HOME" header.
+    {
+        nanojs8::power::Snapshot ps;
+        nanojs8::power::snapshot(&ps);
+        const int pct = ps.battery_pct;
+        uint16_t bcolor = TFT_GREEN;
+        switch (ps.level) {
+            case nanojs8::power::Level::LOW:      bcolor = TFT_ORANGE; break;
+            case nanojs8::power::Level::CRITICAL: bcolor = TFT_RED;    break;
+            case nanojs8::power::Level::NORMAL:   bcolor = TFT_GREEN;  break;
+        }
+        char batt[8];
+        if (pct >= 0 && pct <= 100) {
+            std::snprintf(batt, sizeof(batt), "%d%%", pct);
+        } else {
+            std::snprintf(batt, sizeof(batt), "--");
+        }
+        d.setTextSize(1);
+        d.setTextColor(bcolor, TFT_BLACK);
+        // Right-align: each size-1 char is ~6px wide. Place so the text
+        // ends ~4px from the right edge.
+        const int char_w = 6;
+        const int text_w = (int)std::strlen(batt) * char_w;
+        const int bx = layout::SCREEN_W - text_w - 4;
+        d.setCursor(bx, layout::HEADER_Y + 2);
+        d.printf("%s", batt);
+    }
 
     // Status rows. Live values from NVS for fields we have; placeholder
     // strings for fields not wired in Phase 2.

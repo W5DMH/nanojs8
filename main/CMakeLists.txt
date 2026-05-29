@@ -12,6 +12,7 @@ idf_component_register(
         nanojs8_config
         nanojs8_ui
         nanojs8_radio
+        nanojs8_power
         M5Unified
         M5GFX
         M5Cardputer

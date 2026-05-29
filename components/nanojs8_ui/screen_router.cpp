@@ -17,6 +17,7 @@
 #include <M5Cardputer.h>
 
 #include "input_translator.h"
+#include "power_manager.h"
 #include "screens/home_screen.h"
 #include "screens/placeholder_screen.h"
 #include "screens/setup_screen.h"
@@ -205,6 +206,29 @@ void router_tick() {
     for (size_t i = 0; i < n; ++i) {
         InputEvent ev = translate_bare_arrow(events[i]);
 
+        // ── Power management hooks (Phase 3.5) ──────────────────────────
+        // Any input is "activity": resets the idle timer. If the screen
+        // was dimmed/blanked or we were in charge mode, this keypress is
+        // consumed purely to WAKE — it does not also act on the active
+        // screen (so mashing a key to wake doesn't accidentally trigger
+        // a screen action). notify_activity() performs the wake.
+        const bool was_suppressed = nanojs8::power::ui_rendering_suppressed()
+                                     || nanojs8::power::in_charge_mode();
+        nanojs8::power::notify_activity();
+        if (was_suppressed) {
+            // Screen was off/charging; this key only wakes it. Eat it.
+            continue;
+        }
+
+        // Ctrl+C enters charge mode (production entry; serial `charge`
+        // is the dev entry). Handle before screen dispatch so no screen
+        // can swallow it.
+        if (ev.key == Key::CTRL_C) {
+            ESP_LOGI(TAG, "Ctrl+C → entering charge mode");
+            nanojs8::power::enter_charge_mode();
+            continue;
+        }
+
         // Log key events at DEBUG (typed chars stay quiet to avoid
         // noise during text editing).
         if (ev.key != Key::NONE) {
@@ -229,7 +253,19 @@ void router_tick() {
         // Other unconsumed events: silent.
     }
 
-    // Repaint after dispatching (screens self-suppress redundant draws).
+    // Apply any pending power-driven screen change (dim/blank/charge/wake)
+    // here in the UI task, which owns the display bus. The power monitor
+    // task only records the desired state; this is where M5GFX is touched.
+    nanojs8::power::apply_pending_screen_change();
+
+    // Repaint after dispatching, UNLESS the screen is blanked or in
+    // charge mode — no point rendering to a dark panel, and in charge
+    // mode the panel is asleep so drawing would be wasted work (and
+    // could wake the panel controller). Screens self-suppress redundant
+    // draws; this is the additional power-state suppression.
+    if (nanojs8::power::ui_rendering_suppressed()) {
+        return;
+    }
     screen = active_screen();  // refresh; switch_to may have changed it
     if (screen) {
         screen->render();

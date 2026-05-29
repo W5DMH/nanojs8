@@ -205,6 +205,7 @@ size_t poll(InputEvent* out, size_t out_cap) {
             { 'S', Key::CTRL_S }, { 's', Key::CTRL_S },
             { 'Q', Key::CTRL_Q }, { 'q', Key::CTRL_Q },
             { 'H', Key::CTRL_H }, { 'h', Key::CTRL_H },
+            { 'C', Key::CTRL_C }, { 'c', Key::CTRL_C },
         };
         for (auto& c : combos) {
             const size_t pos = find_char_in_word(state.word, c.ch);
@@ -266,6 +267,7 @@ const char* key_name(Key k) {
         case Key::CTRL_S:    return "CTRL_S";
         case Key::CTRL_Q:    return "CTRL_Q";
         case Key::CTRL_H:    return "CTRL_H";
+        case Key::CTRL_C:    return "CTRL_C";
     }
     return "?";
 }
