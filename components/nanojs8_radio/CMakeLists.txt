@@ -23,6 +23,8 @@ idf_component_register(
         "usb_host_task.cpp"
         "uac_manager.cpp"
         "cp2102_ptt.cpp"
+        "cat_control.cpp"
+        "cat_ptt.cpp"
     INCLUDE_DIRS
         "include"
     REQUIRES
@@ -37,6 +39,7 @@ idf_component_register(
         espressif__usb_host_cdc_acm
         espressif__usb_host_vcp
         espressif__usb_host_cp210x_vcp
+        espressif__usb_host_ch34x_vcp
 )
 
 # Build with the same strict warnings as the other components — we want

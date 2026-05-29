@@ -33,5 +33,7 @@ dependencies:
   ## CP210x sub-driver (DigiRig CP2102).
   espressif/usb_host_cp210x_vcp: "2.1.0"
 
-  ## Phase 3b will add:
-  ##   espressif/usb_host_ch34x_vcp: "2.1.0"   ## (tr)uSDX direct path
+  ## CH34x sub-driver ((tr)uSDX CH340). Phase 3b. Coexists with the
+  ## CP210x driver under the same VCP umbrella — the umbrella auto-selects
+  ## by VID:PID at enumeration time.
+  espressif/usb_host_ch34x_vcp: "2.2.0"

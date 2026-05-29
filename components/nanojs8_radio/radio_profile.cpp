@@ -43,6 +43,17 @@ static const UsbDeviceMatch s_g90_digirig_matches[] = {
     { 0x10C4, 0xEA60, "DigiRig CP2102 (G90 control via DigiRig)" },
 };
 
+// (tr)uSDX: CH340 USB-UART bridge. QinHeng Electronics VID 0x1A86,
+// standard CH340 PID 0x7523. The CH34x VCP driver matches by this
+// VID:PID. Unlike the DigiRig, the (tr)uSDX presents as a SINGLE CDC
+// device with NO internal hub — so it never exercises ESP-IDF's
+// experimental external-hub driver (the source of the assert crash we
+// hit with the DigiRig). This is why the (tr)uSDX is the more robust
+// radio path on the ESP32-S3.
+static const UsbDeviceMatch s_trusdx_matches[] = {
+    { 0x1A86, 0x7523, "(tr)uSDX CH340 serial bridge (CAT + PTT)" },
+};
+
 // ---------------------------------------------------------------------------
 // Catalog
 // ---------------------------------------------------------------------------
@@ -91,6 +102,42 @@ static const RadioProfile s_catalog[] = {
         .serial_match_count= sizeof(s_g90_digirig_matches)/sizeof(s_g90_digirig_matches[0]),
         .audio             = { 48000, 16, 1 },
         .baud_rate         = 19200,
+    },
+    // ─────────────────────────────────────────────────────────────────────
+    // trusdx — Phase 3b (THE recommended reliable radio path)
+    //
+    // (tr)uSDX via CH340. Single CDC device, no internal hub → avoids the
+    // ESP-IDF ext_hub.c assert that crashes the DigiRig path, and needs
+    // only ~3 HCD channels. PTT and (optional) frequency/mode via the
+    // TS-480 CAT subset over the serial port. Audio-over-CAT (UA1;/US;)
+    // is Phase 3b-step-2; this step is CAT control only.
+    {
+        .id                = "trusdx",
+        .display_name      = "(tr)uSDX CAT",
+        .description       = "(tr)uSDX via CH340. CAT control + PTT over a "
+                             "single CDC serial port (TS-480 subset). No "
+                             "internal hub — the robust path on ESP32-S3. "
+                             "Audio-over-CAT deferred to 3b-step-2.",
+        .is_supported_now  = true,
+        .cat_required      = true,
+        .cat_provides_freq = true,
+        .ptt_method        = PttMethod::CAT,
+        // (tr)uSDX keys quickly over CAT. Modest settle delays; the radio
+        // itself sequences TX. Keep conservative for first bring-up.
+        .ptt_on_delay_ms   = 50,
+        .ptt_off_delay_ms   = 50,
+        .ptt_max_hold_s    = 20,
+        .serial_matches    = s_trusdx_matches,
+        .serial_match_count= sizeof(s_trusdx_matches)/sizeof(s_trusdx_matches[0]),
+        // No UAC audio in 3b-step-1. The audio format is unused while
+        // cat-only; left at a sane mono default for when 3b-step-2 wires
+        // the UA1; CDC-audio stream (which is 8-bit 7825/11520 Hz, handled
+        // separately from UAC anyway).
+        .audio             = { 7825, 8, 1 },
+        // (tr)uSDX firmware 2.00t+ runs the CAT port at 115200 8N1.
+        // (38400 also supported; 115200 chosen for audio-streaming
+        // headroom in 3b-step-2.)
+        .baud_rate         = 115200,
     },
     // ─────────────────────────────────────────────────────────────────────
     // digirig_unknown — Phase 3a (THE Phase 3a profile)

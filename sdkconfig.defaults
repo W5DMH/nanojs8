@@ -104,7 +104,20 @@ CONFIG_USB_HOST_HUBS_SUPPORTED=y
 # Allow heap allocations to walk into 8-bit-accessible IRAM if DRAM runs out.
 # This is the same setting Mini-FT8 uses on Cardputer ADV.
 CONFIG_HEAP_PLACE_FUNCTION_INTO_FLASH=y
-CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y
+
+# Panic behavior: AUTO-REBOOT rather than halt.
+#
+# Why: NanoJS8 is a field radio appliance and reliability is the top
+# priority. ESP-IDF's experimental external-hub driver (ext_hub.c) can
+# assert/panic on USB enumeration errors with composite devices that
+# contain an internal hub (e.g. DigiRig) — an upstream bug we can't fix
+# without vendoring the core usb component. Previously PANIC_PRINT_HALT
+# left the device dead ("CPU halted") needing a manual power cycle. With
+# auto-reboot, any such panic becomes a ~2 second self-recovery instead.
+# The core dump is still written to flash first (see below), so we lose
+# no post-mortem diagnostics. The (tr)uSDX path avoids the hub bug
+# entirely, but this is defense-in-depth for every code path.
+CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
 CONFIG_ESP_DEBUG_STUBS_ENABLE=y
 
 # Stack size for the main task (where app_main runs). Default is 3584; we bump

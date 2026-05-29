@@ -47,6 +47,7 @@
 #include "radio_service.h"
 #include "radio_profile.h"
 #include "radio_rx_buffer.h"
+#include "cat_control.h"
 
 #include "config_store.h"
 
@@ -73,6 +74,15 @@ extern bool      cp2102_ptt_is_connected(void);
 extern bool      cp2102_ptt_is_active(void);
 extern esp_err_t cp2102_ptt_assert(void);
 extern esp_err_t cp2102_ptt_release(void);
+
+// (tr)uSDX CAT path (cat_ptt.cpp). Parallel to the cp2102_* RTS path
+// but uses CAT commands for PTT and runs a status-poll task.
+extern esp_err_t cat_ptt_start(const RadioProfile* profile);
+extern void      cat_ptt_stop(void);
+extern bool      cat_ptt_is_connected(void);
+extern bool      cat_ptt_is_active(void);
+extern esp_err_t cat_ptt_assert(void);
+extern esp_err_t cat_ptt_release(void);
 
 // ---------------------------------------------------------------------------
 // Service state
@@ -191,30 +201,46 @@ esp_err_t start(void) {
         ESP_LOGI(TAG, "CDC-ACM host driver installed");
     }
 
-    // 3. UAC class driver task. Will fire RX_CONNECTED when the CM108
-    //    side of DigiRig enumerates.
-    err = uac_manager_start(prof);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "uac_manager_start failed: %s", esp_err_to_name(err));
-        // We don't unwind CDC/host here — the user can `radio stop`
-        // to clean up and retry. Leaving them installed is harmless.
-        s_status.store(Status::ERROR, std::memory_order_release);
-        return err;
-    }
+    // 3 & 4. Branch by PTT method.
+    //
+    // RTS profiles (DigiRig): start the UAC audio class driver AND the
+    // CP2102 RTS-PTT path.
+    //
+    // CAT profiles ((tr)uSDX, step-1): CAT control only — no UAC audio
+    // yet (audio-over-CAT is Phase 3b-step-2). Start just the CAT path.
+    // This also means the (tr)uSDX, a single CDC device with no internal
+    // hub, never instantiates the UAC class driver or touches the audio
+    // isochronous pipes — keeping its footprint to ~3 HCD channels.
+    if (prof->ptt_method == PttMethod::CAT) {
+        err = cat_ptt_start(prof);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "cat_ptt_start failed: %s", esp_err_to_name(err));
+            s_status.store(Status::ERROR, std::memory_order_release);
+            return err;
+        }
+    } else {
+        // 3. UAC class driver task (RX_CONNECTED when CM108 enumerates).
+        err = uac_manager_start(prof);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "uac_manager_start failed: %s", esp_err_to_name(err));
+            s_status.store(Status::ERROR, std::memory_order_release);
+            return err;
+        }
 
-    // 4. CP2102 PTT task. Will retry-open until DigiRig's serial side
-    //    enumerates.
-    err = cp2102_ptt_start(prof);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "cp2102_ptt_start failed: %s", esp_err_to_name(err));
-        uac_manager_stop();
-        s_status.store(Status::ERROR, std::memory_order_release);
-        return err;
+        // 4. CP2102 RTS-PTT task. Retries open until DigiRig serial enumerates.
+        err = cp2102_ptt_start(prof);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "cp2102_ptt_start failed: %s", esp_err_to_name(err));
+            uac_manager_stop();
+            s_status.store(Status::ERROR, std::memory_order_release);
+            return err;
+        }
     }
 
     s_status.store(Status::ENUMERATING, std::memory_order_release);
     s_last_event_ms.store(now_ms(), std::memory_order_release);
-    ESP_LOGI(TAG, "Radio service started; waiting for DigiRig enumeration");
+    ESP_LOGI(TAG, "Radio service started; waiting for %s enumeration",
+             prof->ptt_method == PttMethod::CAT ? "(tr)uSDX CH340" : "DigiRig");
     return ESP_OK;
 }
 
@@ -233,7 +259,11 @@ esp_err_t stop(void) {
     //                          host lib sees ALL_FREE and can uninstall)
     //   4. usb_host_stop    — drains events, calls usb_host_uninstall,
     //                         releases the PHY and the controller
+    // Stop whichever PTT path is active. Both are idempotent and safe
+    // to call even if not started, so we can call both without tracking
+    // which profile was active.
     cp2102_ptt_stop();
+    cat_ptt_stop();
     uac_manager_stop();
 
     // Brief delay to let the per-client tasks notice the stop request,
@@ -288,23 +318,30 @@ void snapshot(Snapshot* out) {
     std::memset(out, 0, sizeof(*out));
 
     // Refresh status based on subsystem health if we're currently
-    // started (so HOME sees CONNECTED roll in once UAC + PTT are both
-    // up, and rolls back to ENUMERATING on disconnect).
+    // started. The "connected" criterion differs by PTT method:
+    //   RTS (DigiRig): UAC streaming AND CP2102 serial both up.
+    //   CAT ((tr)uSDX): the single CH340 CDC port is open (no UAC).
+    const bool is_cat = s_active_profile &&
+                        s_active_profile->ptt_method == PttMethod::CAT;
+
     Status s = s_status.load(std::memory_order_acquire);
     if (s != Status::IDLE && s != Status::ERROR) {
-        const bool uac_ok = uac_manager_is_streaming();
-        const bool ptt_ok = cp2102_ptt_is_connected();
-        if (uac_ok && ptt_ok) {
+        bool connected_now;
+        if (is_cat) {
+            connected_now = cat_ptt_is_connected();
+        } else {
+            connected_now = uac_manager_is_streaming() && cp2102_ptt_is_connected();
+        }
+        if (connected_now) {
             s = Status::CONNECTED;
         } else if (s == Status::CONNECTED) {
-            // Was connected, lost one or both — return to enumerating.
             s = Status::ENUMERATING;
         }
         s_status.store(s, std::memory_order_release);
     }
 
     out->status     = s;
-    out->ptt_active = cp2102_ptt_is_active();
+    out->ptt_active = is_cat ? cat_ptt_is_active() : cp2102_ptt_is_active();
 
     if (s_active_profile) {
         std::strncpy(out->profile_id,   s_active_profile->id,
@@ -329,7 +366,15 @@ void snapshot(Snapshot* out) {
                      sizeof(out->status_text) - 1);
     }
 
-    out->freq_hz         = 0;  // Phase 3a has no CAT freq read
+    // Frequency: CAT profiles read live VFO from the radio. RTS profiles
+    // (DigiRig) have no CAT, so freq stays 0.
+    if (is_cat) {
+        cat::CatState cs;
+        cat::get_state(&cs);
+        out->freq_hz = cs.freq_hz;
+    } else {
+        out->freq_hz = 0;
+    }
     out->rx_frames_total = rx_buffer_frames_total();
     out->rx_overruns     = rx_buffer_overrun_count();
     out->enum_attempts   = s_enum_attempts.load(std::memory_order_acquire);
@@ -342,18 +387,18 @@ void snapshot(Snapshot* out) {
 
 esp_err_t ptt_on(void) {
     if (!s_active_profile) return ESP_ERR_INVALID_STATE;
-    if (s_status.load(std::memory_order_acquire) != Status::CONNECTED) {
-        // Be a bit forgiving: accept CONNECTED OR ENUMERATING-with-PTT-
-        // ready. The HOME status reflects both UAC and PTT being up,
-        // but PTT can be asserted as soon as the CP2102 is connected,
-        // even if UAC is still warming up.
-        if (!cp2102_ptt_is_connected()) {
-            return ESP_ERR_INVALID_STATE;
-        }
+    const bool is_cat = s_active_profile->ptt_method == PttMethod::CAT;
+
+    // PTT can be asserted as soon as the relevant transport is connected,
+    // even if (for RTS profiles) UAC is still warming up.
+    const bool transport_up = is_cat ? cat_ptt_is_connected()
+                                     : cp2102_ptt_is_connected();
+    if (!transport_up) {
+        return ESP_ERR_INVALID_STATE;
     }
     switch (s_active_profile->ptt_method) {
         case PttMethod::RTS:  return cp2102_ptt_assert();
-        case PttMethod::CAT:  return ESP_ERR_NOT_SUPPORTED;  // Phase 3c
+        case PttMethod::CAT:  return cat_ptt_assert();
         case PttMethod::NONE: return ESP_ERR_NOT_SUPPORTED;
     }
     return ESP_ERR_INVALID_STATE;
@@ -361,12 +406,15 @@ esp_err_t ptt_on(void) {
 
 esp_err_t ptt_off(void) {
     if (!s_active_profile) return ESP_ERR_INVALID_STATE;
-    if (!cp2102_ptt_is_connected()) {
+    const bool is_cat = s_active_profile->ptt_method == PttMethod::CAT;
+    const bool transport_up = is_cat ? cat_ptt_is_connected()
+                                     : cp2102_ptt_is_connected();
+    if (!transport_up) {
         return ESP_ERR_INVALID_STATE;
     }
     switch (s_active_profile->ptt_method) {
         case PttMethod::RTS:  return cp2102_ptt_release();
-        case PttMethod::CAT:  return ESP_ERR_NOT_SUPPORTED;
+        case PttMethod::CAT:  return cat_ptt_release();
         case PttMethod::NONE: return ESP_ERR_NOT_SUPPORTED;
     }
     return ESP_ERR_INVALID_STATE;

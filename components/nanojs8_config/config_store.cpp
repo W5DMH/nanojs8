@@ -19,6 +19,7 @@
 const char* const NANOJS8_RADIO_PROFILES[] = {
     "qdx",
     "g90_digirig",
+    "trusdx",
     "digirig_unknown",
 };
 const size_t NANOJS8_RADIO_PROFILES_COUNT =
