@@ -163,6 +163,21 @@ esp_err_t start(void) {
     esp_log_level_set("EXT_HUB", ESP_LOG_ERROR);
     esp_log_level_set("EXT_PORT", ESP_LOG_ERROR);
 
+    // Phase 3b diagnostic: spurious (tr)uSDX CH340 disconnects of unknown
+    // cause. Bump the USB-host stack and cdc_acm to DEBUG so we capture
+    // whatever event sequence precedes the disconnect — endpoint stalls,
+    // transfer errors, descriptor failures, or just a clean device-gone
+    // notification. DEBUG (not VERBOSE) is enough; VERBOSE produces a
+    // flood without proportional diagnostic value. The default INFO level
+    // showed nothing prior to the disconnect, which is itself a clue —
+    // the cdc_acm callback fires WITHOUT preceding error logs at INFO,
+    // so the actual cause is hiding at WARN/DEBUG. This block can be
+    // pulled back to INFO once the cause is identified.
+    esp_log_level_set("USBH",     ESP_LOG_DEBUG);
+    esp_log_level_set("HCD",      ESP_LOG_DEBUG);
+    esp_log_level_set("ENUM",     ESP_LOG_DEBUG);
+    esp_log_level_set("cdc_acm",  ESP_LOG_DEBUG);
+
     // Pre-flight: ensure the RX ring is ready. uac_manager will also
     // call rx_buffer_init() but doing it here guarantees the buffer
     // exists before any other subsystem races a write into it.

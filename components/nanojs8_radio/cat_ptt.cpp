@@ -62,18 +62,54 @@ static std::atomic<bool>            s_poll_run{false};
 static int64_t now_us() { return esp_timer_get_time(); }
 
 // ---------------------------------------------------------------------------
-// CDC event callback (disconnect detection)
+// CDC event callback (disconnect detection + diagnostic logging)
 // ---------------------------------------------------------------------------
+//
+// The cdc_acm driver fires this for ALL device events, not just disconnect.
+// For the Phase 3b spurious-disconnect investigation we log every event
+// type, especially ERROR (which carries an esp_err_t in event->data.error
+// telling us WHAT went wrong). The events arrive on the cdc_acm client
+// task, not an ISR, so logging here is safe.
 
 static void cdc_event_cb(const cdc_acm_host_dev_event_data_t* event, void* arg) {
     (void)arg;
-    if (event && event->type == CDC_ACM_HOST_DEVICE_DISCONNECTED) {
-        ESP_LOGI(TAG, "(tr)uSDX CH340 disconnected");
-        s_connected.store(false, std::memory_order_release);
-        s_ptt_active.store(false, std::memory_order_release);
-        cat::unbind();
-        // The device object is invalidated by the stack; drop our handle.
-        // The poll task will see !connected and idle.
+    if (!event) return;
+
+    switch (event->type) {
+        case CDC_ACM_HOST_ERROR:
+            // This is the diagnostic we've been missing. event->data.error
+            // is the esp_err_t reported by the underlying USB host stack.
+            ESP_LOGE(TAG, "(tr)uSDX CH340 CDC ERROR: %s (0x%x)",
+                     esp_err_to_name(event->data.error),
+                     (unsigned)event->data.error);
+            // ERROR doesn't necessarily mean disconnect; the stack may
+            // recover. We DON'T tear down on ERROR alone — only on the
+            // DISCONNECTED event below.
+            break;
+
+        case CDC_ACM_HOST_SERIAL_STATE:
+            // UART line state notifications (DSR, RI, framing, parity,
+            // overrun, break). If the CH340 reports a serial-state change
+            // it may foreshadow a problem.
+            ESP_LOGW(TAG, "(tr)uSDX CH340 serial-state change");
+            break;
+
+        case CDC_ACM_HOST_NETWORK_CONNECTION:
+            ESP_LOGI(TAG, "(tr)uSDX CH340 network-connection event");
+            break;
+
+        case CDC_ACM_HOST_DEVICE_DISCONNECTED:
+            ESP_LOGI(TAG, "(tr)uSDX CH340 disconnected");
+            s_connected.store(false, std::memory_order_release);
+            s_ptt_active.store(false, std::memory_order_release);
+            cat::unbind();
+            // The device object is invalidated by the stack; drop our
+            // handle. The poll task will see !connected and idle.
+            break;
+
+        default:
+            ESP_LOGW(TAG, "(tr)uSDX CH340 unknown event type %d", (int)event->type);
+            break;
     }
 }
 
@@ -86,10 +122,26 @@ static void poll_task_entry(void* arg) {
     (void)arg;
     ESP_LOGI(TAG, "CAT poll task started on core %d", xPortGetCoreID());
     const uint16_t max_hold_s = s_active_profile ? s_active_profile->ptt_max_hold_s : 20;
+    const int64_t  start_us   = now_us();
 
-    int64_t last_poll_us = 0;
+    int64_t last_poll_us      = 0;
+    int64_t last_heartbeat_us = 0;
+    uint32_t poll_count        = 0;
+    uint32_t poll_err_count    = 0;
+
     while (s_poll_run.load(std::memory_order_acquire)) {
         const int64_t t = now_us();
+
+        // Diagnostic heartbeat every 60s: uptime + poll stats so we can
+        // correlate disconnect timing against what we were doing.
+        if (t - last_heartbeat_us >= 60000000) {
+            const uint32_t up_s = (uint32_t)((t - start_us) / 1000000);
+            ESP_LOGI(TAG, "heartbeat: up=%us connected=%d polls=%u errs=%u",
+                     up_s,
+                     (int)s_connected.load(std::memory_order_acquire),
+                     (unsigned)poll_count, (unsigned)poll_err_count);
+            last_heartbeat_us = t;
+        }
 
         // PTT safety watchdog: auto-release if held too long.
         if (s_ptt_active.load(std::memory_order_acquire)) {
@@ -118,7 +170,9 @@ static void poll_task_entry(void* arg) {
         if (s_connected.load(std::memory_order_acquire) &&
             !s_ptt_active.load(std::memory_order_acquire)) {
             if (t - last_poll_us >= 30000000) {
-                cat::poll_status();   // updates cat state; errors are non-fatal
+                const esp_err_t pe = cat::poll_status();
+                ++poll_count;
+                if (pe != ESP_OK) ++poll_err_count;
                 last_poll_us = t;
             }
         }
