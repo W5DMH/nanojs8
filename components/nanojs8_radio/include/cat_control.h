@@ -72,8 +72,16 @@ typedef void* CatDeviceHandle;   // really a CdcAcmDevice*
 esp_err_t bind(CatDeviceHandle dev);
 
 // Release the CAT session (does not close the underlying CDC device;
-// the radio service owns that lifecycle).
+// the radio service owns that lifecycle). Sends UA0; first to leave
+// the radio in a clean state for the next session. Call from graceful
+// teardown paths where the device is still healthy (e.g. radio_service::stop).
 void unbind(void);
+
+// Forced-release variant for the disconnect path: the device is already
+// invalidated (USB cable pull, radio firmware reset), so we skip the
+// UA0; send (which would error or block on a dead device). Call from
+// the cdc_acm DEVICE_DISCONNECTED event handler.
+void unbind_forced(void);
 
 // PTT control via CAT. tx=true sends TX0; (transmit), tx=false sends RX;.
 esp_err_t set_ptt(bool tx);

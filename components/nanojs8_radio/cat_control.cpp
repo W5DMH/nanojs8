@@ -181,12 +181,62 @@ esp_err_t bind(CatDeviceHandle dev) {
 
     if (!s_dev) return ESP_ERR_INVALID_ARG;
 
+    // ------------------------------------------------------------------
+    // (tr)uSDX init sequence — derived from the reference Python driver
+    // (olgierd/trusdx-audio, SQ3SWF 2023). The (tr)uSDX is an Atmega328
+    // running CAT alongside DSP/audio/RF/display, and it has two startup
+    // quirks that bit us before we understood them:
+    //
+    // QUIRK 1: 3-second post-open settle delay.
+    //   After the serial port opens, the radio's firmware needs ~3 s
+    //   before it will respond to ANY CAT command. Sending ID; before
+    //   that window times out silently. The reference Python does this:
+    //
+    //       ser = serial.Serial(...)
+    //       time.sleep(3)        # wait for device to start
+    //       ser.write(b"UA1;")   # NOW send commands
+    //
+    //   Without this wait we see "No CAT ID; reply within 500 ms" on
+    //   cold sessions even though the radio is fine.
+    //
+    // QUIRK 2: Streaming state (UA0/UA1/UA2) is sticky across sessions.
+    //   If a prior application (WSJT-X, JS8Call, our own audio code in
+    //   step-2) left the radio in UA1; (audio streaming on), the radio
+    //   sends continuous audio bytes the moment we open the port.
+    //   Our ID; query gets buried in the audio stream and times out.
+    //   ~30-60 s later the (tr)uSDX's small Atmega328 USB buffer fills
+    //   up, its firmware self-resets the USB stack to recover, and we
+    //   see a CDC disconnect of mysterious cause. That was the source
+    //   of the disconnects we observed in v0.5.0/0.5.1/0.5.2 testing.
+    //
+    // FIX: wait 3 s, then explicitly send UA0; to force CAT-only mode
+    // before any other command. UA0; is idempotent (no-op if already
+    // off) so it's safe regardless of prior state.
+    // ------------------------------------------------------------------
+
+    ESP_LOGI(TAG, "Waiting 3 s for (tr)uSDX firmware to be ready...");
+    vTaskDelay(pdMS_TO_TICKS(3000));
+
+    // Force CAT-only mode (clear any leftover UA1;/UA2; from prior
+    // sessions). No reply expected; we just discard whatever's in the
+    // buffer immediately afterward to drop any stale audio bytes that
+    // arrived during the settle wait.
+    esp_err_t err = send_cmd("UA0;");
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "UA0; send failed: %s — continuing", esp_err_to_name(err));
+    } else {
+        ESP_LOGI(TAG, "Sent UA0; (force CAT-only mode)");
+    }
+    // Give the radio a moment to process UA0; and stop any audio stream,
+    // then clear the RX buffer of stale bytes accumulated during settle.
+    vTaskDelay(pdMS_TO_TICKS(200));
+    clear_rx();
+
     // Handshake: send ID; and expect "ID020;". The (tr)uSDX emulates a
     // TS-480 (id 020). A wrong/absent id isn't fatal — we log and let
     // the caller decide — but it's a useful sanity check that we're
     // actually talking to a (tr)uSDX and not some other CH340 device.
-    clear_rx();
-    esp_err_t err = send_cmd("ID;");
+    err = send_cmd("ID;");
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "ID; send failed: %s", esp_err_to_name(err));
         return err;
@@ -208,6 +258,35 @@ esp_err_t bind(CatDeviceHandle dev) {
 }
 
 void unbind(void) {
+    // Graceful unbind: leave the radio in a clean state for the next
+    // session by sending UA0; so any streaming we enabled is disabled.
+    // Caller should only invoke this path when the device is still
+    // healthy (e.g. radio_service::stop()). For the disconnect path
+    // where the device is already invalidated, use unbind_forced().
+    if (s_dev) {
+        const esp_err_t err = send_cmd("UA0;");
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Sent UA0; on unbind (leave radio in CAT-only state)");
+        } else {
+            ESP_LOGD(TAG, "UA0; on unbind failed: %s", esp_err_to_name(err));
+        }
+        // Brief settle so the radio actually processes the command before
+        // the device handle goes away under us.
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+    s_dev = nullptr;
+    s_valid.store(false, std::memory_order_release);
+    clear_rx();
+}
+
+void unbind_forced(void) {
+    // Forced unbind: device is already gone (USB disconnect, cable pull,
+    // (tr)uSDX firmware reset). Do NOT attempt any I/O — tx_blocking on
+    // an invalidated device would error or block, and we're typically
+    // running in the cdc_acm client event-callback context where blocking
+    // is harmful. Just zero our state and let the device handle be freed
+    // by the cdc_acm driver.
     s_dev = nullptr;
     s_valid.store(false, std::memory_order_release);
     clear_rx();

@@ -102,7 +102,7 @@ static void cdc_event_cb(const cdc_acm_host_dev_event_data_t* event, void* arg) 
             ESP_LOGI(TAG, "(tr)uSDX CH340 disconnected");
             s_connected.store(false, std::memory_order_release);
             s_ptt_active.store(false, std::memory_order_release);
-            cat::unbind();
+            cat::unbind_forced();  // device already gone — no I/O attempted
             // The device object is invalidated by the stack; drop our
             // handle. The poll task will see !connected and idle.
             break;
