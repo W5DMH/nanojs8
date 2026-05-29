@@ -15,7 +15,7 @@
 
 #pragma once
 
-#define NANOJS8_VERSION       "0.5.0"
+#define NANOJS8_VERSION       "0.5.1"
 #define NANOJS8_VERSION_PHASE "Phase 3b - (tr)uSDX CAT"
 
 #define NANOJS8_BUILD_DATE __DATE__

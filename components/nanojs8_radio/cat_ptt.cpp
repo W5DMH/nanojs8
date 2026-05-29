@@ -101,11 +101,23 @@ static void poll_task_entry(void* arg) {
             }
         }
 
-        // Status poll every ~2 s, but ONLY while not transmitting (don't
-        // inject CAT queries mid-TX; the radio is streaming/keyed).
+        // Status poll every ~30 s, but ONLY while not transmitting
+        // (don't inject CAT queries mid-TX; the radio is streaming/keyed).
+        //
+        // Why 30 s (not 2 s): the (tr)uSDX is an Atmega328 running CAT
+        // alongside DSP/audio/RF/display. Aggressive polling stresses its
+        // firmware loop timing and eventually causes USB instability —
+        // we observed clean disconnects after ~6 minutes of 2-second
+        // polling in steady-state RX with no transmit. The (tr)uSDX
+        // community independently arrived at the same conclusion:
+        //   - N1UGK (FT8-over-CAT): "set the CAT polling to 30 seconds"
+        //   - PE4BAS (WSJT-X with (tr)uSDX): 80 seconds
+        // 30 s is the proven sweet spot — display lag of up to 30 s when
+        // tuning on the rig's own knob is acceptable for an informational
+        // display (the operator is looking at the rig when they turn it).
         if (s_connected.load(std::memory_order_acquire) &&
             !s_ptt_active.load(std::memory_order_acquire)) {
-            if (t - last_poll_us >= 2000000) {
+            if (t - last_poll_us >= 30000000) {
                 cat::poll_status();   // updates cat state; errors are non-fatal
                 last_poll_us = t;
             }
