@@ -135,6 +135,24 @@ esp_err_t start(void) {
     ESP_LOGI(TAG, "Starting radio service for profile '%s' (%s)",
              prof->id, prof->display_name);
 
+    // Tame USB-stack log spam. ESP-IDF's external-hub driver is
+    // experimental in v5.5.x and logs "Hub status change has not been
+    // implemented yet" at WARN level — on every hub status-change poll.
+    // The DigiRig contains an INTERNAL USB hub (CM108 + CP2102 behind a
+    // hub), so this fires constantly, especially under marginal bus
+    // power, flooding the console and stealing CPU from enumeration.
+    //
+    // We can't fix the driver (it's in the IDF tree, not our vendored
+    // copy), but we can mute its noise so real diagnostics are visible
+    // and the logging itself stops consuming cycles. We raise the
+    // threshold for the noisy tags to ERROR so genuine errors still
+    // show but the WARN spam is dropped.
+    //
+    // These calls are idempotent and cheap; re-applying on every start()
+    // is harmless and survives any IDF re-init that might reset levels.
+    esp_log_level_set("EXT_HUB", ESP_LOG_ERROR);
+    esp_log_level_set("EXT_PORT", ESP_LOG_ERROR);
+
     // Pre-flight: ensure the RX ring is ready. uac_manager will also
     // call rx_buffer_init() but doing it here guarantees the buffer
     // exists before any other subsystem races a write into it.

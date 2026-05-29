@@ -228,6 +228,12 @@ static int cmd_radio(int argc, char** argv) {
         std::printf("rx_frames:  %lu  rx_overruns: %lu\n",
                     (unsigned long)snap.rx_frames_total,
                     (unsigned long)snap.rx_overruns);
+        {
+            const int bat_pct = M5Cardputer.Power.getBatteryLevel();
+            const int bat_mv  = M5Cardputer.Power.getBatteryVoltage();
+            std::printf("battery:    %d%% (%d mV)%s\n", bat_pct, bat_mv,
+                        bat_mv > 0 && bat_mv < 3600 ? "  *** LOW ***" : "");
+        }
         return 0;
     }
     std::printf("Unknown subcommand: %s\n", argv[1]);
@@ -332,6 +338,22 @@ extern "C" void app_main(void) {
              chip_info.cores);
     ESP_LOGI(TAG, "Free DRAM: %lu bytes (%lu KB)",
              (unsigned long)free_dram, (unsigned long)free_dram_kb);
+
+    // Battery diagnostics. Critical for Phase 3a power debugging: a plain
+    // OTG cable means the DigiRig is powered from this battery, and if it
+    // sags under load the DigiRig brown-outs mid-enumeration. Voltage is
+    // the useful number — under ~3.6 V the device is nearly empty and
+    // can't reliably supply a USB peripheral.
+    //
+    // Note: Cardputer ADV hardware can't read charge current or charging
+    // state (per M5 docs), only level (%) and voltage (mV).
+    {
+        const int bat_pct = M5Cardputer.Power.getBatteryLevel();
+        const int bat_mv  = M5Cardputer.Power.getBatteryVoltage();
+        ESP_LOGI(TAG, "Battery: %d%% (%d mV)%s", bat_pct, bat_mv,
+                 bat_mv > 0 && bat_mv < 3600
+                   ? "  *** LOW — USB host may brown out ***" : "");
+    }
 
     // SD mount attempt — non-fatal in Phase 1.
     const esp_err_t sd_err = mount_sd_spi();

@@ -15,7 +15,7 @@
 
 #pragma once
 
-#define NANOJS8_VERSION       "0.3.2"
+#define NANOJS8_VERSION       "0.3.3"
 #define NANOJS8_VERSION_PHASE "Phase 3a - DigiRig + RTS-PTT"
 
 #define NANOJS8_BUILD_DATE __DATE__
