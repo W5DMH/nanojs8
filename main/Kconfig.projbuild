@@ -1,0 +1,29 @@
+menu "NanoJS8 configuration"
+
+    config NANOJS8_GPS_ENABLED
+        bool "Enable GPS for automatic UTC sync (consumes UART0 console)"
+        default n
+        help
+            Enable the u-blox MIA-M10Q GNSS receiver on the LilyGO T-Deck
+            Plus for automatic UTC clock sync. The receiver is hardwired
+            to GPIO 43/44 — the same pins as the default UART0 console.
+
+            Enabling this option causes app_main, after the TX self-test
+            passes, to tear down the UART0 console and reassign GPIO
+            43/44 to UART1 at 38400 baud for NMEA reception. Boot-time
+            log messages (everything from "ESP-ROM:..." through "TX
+            encoder ready") still emit normally over the Pi /dev/serial0
+            cable — only runtime log lines (heartbeat status, per-decode
+            RX lines, etc.) are silenced after the handover.
+
+            UTC sync policy: on first valid RMC sentence, immediately
+            anchor the time component. Re-sync every 60 seconds
+            thereafter as long as the fix remains valid. Manual UTC
+            entry via SETUP row 6 still works as a bootstrap before
+            GPS acquires fix; once GPS has fix, it always wins.
+
+            For pure debugging sessions where you need the runtime
+            console, leave this OFF and use SETUP row 6 to enter UTC
+            manually. The two configurations are otherwise identical.
+
+endmenu

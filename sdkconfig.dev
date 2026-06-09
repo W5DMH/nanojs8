@@ -1,0 +1,19 @@
+# sdkconfig.dev — overlay used for local development.
+#
+# Apply via:
+#   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.dev" build
+#
+# Or omit it entirely — sdkconfig.defaults already has these settings; this
+# file just makes them explicit so the dev/release distinction is obvious.
+
+# ── Console: UART0 on Grove pins (GPIO 43 TX, GPIO 44 RX) ──────────────────
+# This is the Pi /dev/serial0 monitor cable path. Required for log capture
+# during development because USB Serial-JTAG ties up the same USB-C cable
+# that DigiRig wants for UAC + CDC.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+# CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG is not set
+
+# ── GPS: disabled ───────────────────────────────────────────────────────────
+# Pi monitor cable shares GPIO 43/44 with the GPS module on T-Deck Plus.
+# Leaving GPS off keeps those pins free for the dev console.
+# CONFIG_NANOJS8_GPS_ENABLED is not set

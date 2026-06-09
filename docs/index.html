@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NanoJS8 — Install</title>
+  <meta name="description" content="One-click installer for NanoJS8, a pocket JS8 amateur-radio transceiver firmware for the LilyGO T-Deck Plus." />
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #1a1d23;
+      --text: #e6e6e6;
+      --text-dim: #9aa0a6;
+      --accent: #4cc9f0;
+      --border: #2a2f38;
+      --good: #4ade80;
+      --warn: #fbbf24;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #fafafa;
+        --panel: #ffffff;
+        --text: #1a1d23;
+        --text-dim: #5a6370;
+        --accent: #0369a1;
+        --border: #e2e5ea;
+        --good: #15803d;
+        --warn: #b45309;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    main {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    h1 {
+      font-size: 2rem;
+      margin: 0 0 4px;
+      letter-spacing: -0.02em;
+    }
+    .tagline {
+      color: var(--text-dim);
+      margin: 0 0 32px;
+    }
+    .status {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 999px;
+      background: rgba(251, 191, 36, 0.15);
+      color: var(--warn);
+      font-size: 0.85rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      margin-bottom: 8px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      margin: 20px 0;
+    }
+    .panel h2 {
+      font-size: 1.15rem;
+      margin: 0 0 12px;
+    }
+    .panel h2:not(:first-child) {
+      margin-top: 24px;
+    }
+    .install-row {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 0 8px;
+    }
+    .install-row esp-web-install-button {
+      --esp-tools-button-color: var(--accent);
+      --esp-tools-button-text-color: #fff;
+    }
+    .install-row .browser-note {
+      color: var(--text-dim);
+      font-size: 0.9rem;
+      text-align: center;
+    }
+    ol, ul {
+      padding-left: 20px;
+    }
+    li { margin-bottom: 6px; }
+    code, kbd {
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+      background: rgba(127,127,127,0.12);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 0.9em;
+    }
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    a:hover { text-decoration: underline; }
+    footer {
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+      color: var(--text-dim);
+      font-size: 0.85rem;
+      text-align: center;
+    }
+    .kv {
+      display: grid;
+      grid-template-columns: max-content 1fr;
+      gap: 6px 14px;
+      margin: 12px 0;
+    }
+    .kv dt { color: var(--text-dim); }
+    .kv dd { margin: 0; }
+    .warn {
+      border-left: 3px solid var(--warn);
+      padding: 8px 14px;
+      background: rgba(251, 191, 36, 0.05);
+      border-radius: 0 6px 6px 0;
+      margin: 12px 0;
+    }
+  </style>
+</head>
+<body>
+<main>
+
+  <span class="status">PRE-ALPHA · TEST BUILD</span>
+  <h1>NanoJS8</h1>
+  <p class="tagline">A pocket JS8 amateur-radio transceiver for the LilyGO T-Deck Plus.</p>
+
+  <div class="panel">
+    <h2>Install firmware</h2>
+    <div class="install-row">
+      <esp-web-install-button manifest="manifest.json">
+        <span slot="unsupported">
+          Your browser doesn't support Web Serial. Use
+          <a href="https://www.google.com/chrome/">Chrome</a> or
+          <a href="https://www.microsoft.com/edge">Edge</a> on a desktop OS
+          (Windows, macOS, Linux, or ChromeOS).
+        </span>
+        <span slot="not-allowed">
+          Web Serial isn't available in this context. Make sure the page
+          is loaded over HTTPS and try again.
+        </span>
+      </esp-web-install-button>
+      <p class="browser-note">Chrome or Edge required · Desktop only · ~30 seconds</p>
+    </div>
+
+    <h2>Before you start</h2>
+    <ul>
+      <li>Connect your <strong>T-Deck Plus</strong> to your computer with a USB-C data cable</li>
+      <li>Power the T-Deck Plus on (slide switch on the side)</li>
+      <li>Make sure no other app (e.g. Arduino IDE serial monitor) has the COM port open</li>
+    </ul>
+
+    <h2>What the installer does</h2>
+    <ol>
+      <li>Browser prompts you to select the T-Deck Plus's serial port</li>
+      <li>Flashes the bootloader, app, and JSC dictionary (~4&nbsp;MB)</li>
+      <li>Device reboots into NanoJS8 — the home screen will appear on the T-Deck display</li>
+    </ol>
+    <p>Existing data on the device's NVS (saved settings, INBOX) is preserved by default. Tick "Erase device" in the installer if you want a fresh start.</p>
+  </div>
+
+  <div class="panel">
+    <h2>First-boot setup</h2>
+    <ol>
+      <li>From <strong>HOME</strong> press <kbd>Tab</kbd> until you reach <strong>SETUP</strong></li>
+      <li>Enter your <strong>callsign</strong> and Maidenhead <strong>grid</strong> (e.g. <code>EN83</code>)</li>
+      <li>Pick your <strong>radio profile</strong> (default <code>digirig-rts-only</code> works with most radios that accept RTS PTT)</li>
+      <li>Tune your radio to <strong>7.078&nbsp;MHz USB</strong> (the standard JS8 calling frequency on 40&nbsp;m)</li>
+      <li>Connect the audio adapter (e.g. DigiRig) via USB-C Y-cable</li>
+    </ol>
+    <p>UTC time will be acquired automatically from the on-board GPS within a few minutes of getting outdoor visibility to the sky. You can also enter UTC manually on SETUP row 6 if you're indoors.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Hardware you'll need</h2>
+    <dl class="kv">
+      <dt>Device</dt><dd><a href="https://lilygo.cc/products/t-deck-plus">LilyGO T-Deck Plus</a> (16&nbsp;MB flash + 8&nbsp;MB PSRAM, has GPS)</dd>
+      <dt>Radio interface</dt><dd>DigiRig (or similar USB sound + RTS-PTT adapter)</dd>
+      <dt>Cabling</dt><dd>USB-C Y-cable so the T-Deck and DigiRig can both be powered</dd>
+      <dt>Radio</dt><dd>Any HF SSB transceiver with a PTT line — verified on Xiegu G90</dd>
+    </dl>
+  </div>
+
+  <div class="panel">
+    <h2>Status &amp; limitations</h2>
+    <div class="warn">
+      <strong>This is a pre-alpha test build.</strong> It has been on-air verified for bidirectional MSG/ACK between W5DMH and KD8PGB on 40&nbsp;m JS8 Normal mode. Expect rough edges, occasional UI glitches, and reduced sensitivity vs. desktop JS8Call. <strong>It is your responsibility</strong> to ensure you are operating within your licence privileges.
+    </div>
+    <ul>
+      <li>JS8 Normal mode only (Slow / Fast / Turbo not yet supported)</li>
+      <li>Tested against stock JS8Call as a reference station</li>
+      <li>Group <code>@GHOSTNET</code> is the test net frequented by initial testers</li>
+      <li>Report issues at <a href="https://github.com/W5DMH/nanojs8/issues">github.com/W5DMH/nanojs8/issues</a></li>
+    </ul>
+  </div>
+
+  <div class="panel">
+    <h2>Alternatives to one-click flashing</h2>
+    <p>If your browser doesn't support Web Serial, or you'd rather flash by hand:</p>
+    <ol>
+      <li>Download <code>nanojs8-merged.bin</code> from the latest <a href="https://github.com/W5DMH/nanojs8/releases/latest">GitHub Release</a></li>
+      <li>Install <a href="https://docs.espressif.com/projects/esptool/en/latest/esp32s3/installation.html">esptool</a> (<code>pip install esptool</code>)</li>
+      <li>Run:<br><code>esptool.py --chip esp32s3 --port COM&lt;n&gt; write_flash 0x0 nanojs8-merged.bin</code></li>
+    </ol>
+  </div>
+
+  <footer>
+    NanoJS8 is GPL-3.0 licensed. Source &amp; releases at
+    <a href="https://github.com/W5DMH/nanojs8">github.com/W5DMH/nanojs8</a>.
+    Built by Dan W5DMH (grid EN83). Inherits from <a href="https://github.com/jfrancis42/gfsk8-modem-clean">gfsk8-modem-clean</a> and the JS8Call lineage.
+  </footer>
+
+</main>
+
+<script
+  type="module"
+  src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module">
+</script>
+
+</body>
+</html>

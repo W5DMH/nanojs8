@@ -1,0 +1,34 @@
+name: Build
+
+# Verifies the release-profile build still compiles cleanly. Runs on every
+# push to main and every pull request. No artifacts uploaded — that's the
+# release workflow's job. If this fails, do not tag a release until fixed.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-release-profile:
+    name: Build (release profile)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build firmware (sdkconfig.defaults + sdkconfig.release)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.4
+          target: esp32s3
+          path: '.'
+          command: idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.release" build
+
+      - name: Report binary size
+        run: |
+          echo "## App image" >> $GITHUB_STEP_SUMMARY
+          ls -la build/nanojs8.bin >> $GITHUB_STEP_SUMMARY || true
+          echo "## JSC dictionary" >> $GITHUB_STEP_SUMMARY
+          ls -la build/jsc_map.bin >> $GITHUB_STEP_SUMMARY || true

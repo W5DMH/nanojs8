@@ -1,0 +1,7 @@
+# Managed dependencies for the USB serial subsystem.
+# All from Espressif's official Component Registry — same drivers that
+# successfully enumerated the DigiRig Mobile in our probe firmware.
+dependencies:
+  espressif/usb_host_cdc_acm:    "^2.0"    # base CDC-ACM driver
+  espressif/usb_host_cp210x_vcp: "^2.0"    # CP2102-specific control xfers
+  espressif/usb_host_vcp:        "^1.0"    # facade with VCP::open()

@@ -1,18 +1,31 @@
-# NanoJS8 partition table — Cardputer ADV ESP32-S3FN8 (8 MB flash)
+# NanoJS8 v0.7 partition table — L7.4a layout for memory-mapped JSC map
+# 16 MB flash, T-Deck / T-Deck Plus
 #
-# Layout per Build Specification §4.3:
-#   nvs       0x010000     32 KB    config (callsign, profile, GPS, grid, etc.)
-#   phy_init  0x018000      4 KB    radio PHY init data (unused — WiFi off)
-#   factory   0x020000   4096 KB    application binary
-#   spiffs    0x420000   3712 KB    inbox.jsonl, log.jsonl, etc.
-#   coredump  0x7C0000    256 KB    post-mortem panic captures
+# Changes from L7.3:
+#   - Dropped ota_1 (we keep ota_0 for OTA-recovery; field updates still possible)
+#   - Added jsc_map (6 MB, raw-data partition for memory-mapped JS8 dictionary)
+#   - Shrank storage 9 MB → 5 MB (still plenty for logs/configs)
+#   - factory still 2 MB (current binary is ~750 KB, headroom > 2x)
 #
-# Note: NVS uses 4 sectors (32 KB) for headroom on Cardputer ADV ES8311 / TCA8418
-# config; Mini-FT8 used 24 KB but ran into wear-level shortage. 32 KB is safe.
+# Address math:
+#   factory:  0x020000 + 0x200000 = 0x220000
+#   ota_0:    0x220000 + 0x200000 = 0x420000
+#   jsc_map:  0x420000 + 0x600000 = 0xA20000   ← 6 MB raw partition for JSC
+#   storage:  0xA20000 + 0x500000 = 0xF20000
+#   coredump: 0xF20000 + 0x040000 = 0xF60000
+#   Total used: 15.4 MB / 16 MB
 #
-# Name,     Type, SubType,  Offset,    Size,      Flags
-nvs,        data, nvs,      0x010000,  0x008000,
-phy_init,   data, phy,      0x018000,  0x001000,
-factory,    app,  factory,  0x020000,  0x400000,
-spiffs,     data, spiffs,   0x420000,  0x3A0000,
-coredump,   data, coredump, 0x7C0000,  0x040000,
+# jsc_map subtype: 0x40 is a user-defined raw data partition (no filesystem)
+#   This is what esp_partition_mmap() consumes; access is via the
+#   "jsc_map" label, not the subtype number, so the value is arbitrary
+#   as long as it's not one of ESP-IDF's reserved subtypes.
+#
+# Name,     Type,  SubType, Offset,    Size,      Flags
+nvs,        data,  nvs,     0x9000,    0x6000,
+otadata,    data,  ota,     0xF000,    0x2000,
+phy_init,   data,  phy,     0x11000,   0x1000,
+factory,    app,   factory, 0x20000,   0x200000,
+ota_0,      app,   ota_0,   0x220000,  0x200000,
+jsc_map,    data,  0x40,    0x420000,  0x600000,
+storage,    data,  spiffs,  0xA20000,  0x500000,
+coredump,   data,  coredump,0xF20000,  0x40000,

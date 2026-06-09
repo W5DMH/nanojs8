@@ -1,0 +1,23 @@
+# sdkconfig.release — overlay used by CI to produce the public test build.
+#
+# Apply via:
+#   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.release" build
+#
+# This file ONLY contains the deltas from sdkconfig.defaults that distinguish
+# a release build from the dev build. Everything else (heap, FreeRTOS, etc.)
+# is identical so timing/memory characteristics match what you tested on-air.
+
+# ── Console: USB Serial-JTAG (instead of UART0 on GPIO 43/44) ───────────────
+# Reason: GPS uses UART1 on GPIO 43/44 as soon as it initializes. Even
+# though UART0 and UART1 are different peripherals, only one can drive
+# the pins at a time. Moving the console to USB Serial-JTAG keeps console
+# output available to testers (idf.py monitor or the ESP Web Tools
+# built-in browser console) AND lets GPS have GPIO 43/44 exclusively.
+# CONFIG_ESP_CONSOLE_UART_DEFAULT is not set
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# ── GPS: enabled ────────────────────────────────────────────────────────────
+# Auto-syncs UTC over the u-blox MIA-M10Q on UART1 (GPIO 43/44, 38400 baud).
+# The operator can still set UTC manually via SETUP row 6; once GPS has a
+# valid fix it always wins.
+CONFIG_NANOJS8_GPS_ENABLED=y

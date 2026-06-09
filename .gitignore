@@ -1,37 +1,26 @@
-# ESP-IDF build outputs
+# ESP-IDF build output
 build/
-sdkconfig
-sdkconfig.old
-sdkconfig.*.old
-dependencies.lock.local
 managed_components/
 
-# Editor / IDE
-.vs/
+# Generated sdkconfig (different from the checked-in sdkconfig.defaults / .dev / .release)
+sdkconfig
+sdkconfig.old
+
+# Component manager lockfile (regenerated on first build)
+dependencies.lock
+
+# IDE / editor
+.vscode/
+.cache/
+.clangd/
+compile_commands.json
 *.swp
 *~
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
+# CI artifacts (only generated during release builds)
+nanojs8-merged.bin
+docs/nanojs8-merged.bin
 
-# OS junk
+# OS
 .DS_Store
 Thumbs.db
-desktop.ini
-
-# Local-only files
-*.local
-.env
-
-# Vendored components fetched by tools/fetch_components.ps1 — re-fetched per
-# clone rather than committed (saves ~140 MB repo size).
-components/M5GFX/
-components/M5Unified/
-
-# gfsk8 upstream cloned by tools/apply_gfsk8_patches.ps1 — re-cloned per clone.
-components/gfsk8_modem/upstream/
-
-# Stamp files written by fetch_components to mark pinned versions
-.nanojs8_pin

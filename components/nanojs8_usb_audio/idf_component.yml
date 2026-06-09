@@ -1,0 +1,17 @@
+# Managed dependency manifest for nanojs8_usb_audio.
+#
+# When idf.py reconfigure / build runs, the IDF Component Manager downloads
+# the listed dependencies into managed_components/ and makes them available
+# to this component's build.
+#
+# usb_host_uac is Espressif's official UAC 1.0 host driver. We use it as
+# the managed dependency rather than vendoring the source, so we
+# automatically pick up Espressif's bug fixes.
+#
+# Version pin rationale:
+#   "^1.3.0" allows any 1.x.y where x.y >= 3.0 (semver-compatible upgrades),
+#   but not 2.x.y if/when that lands and breaks the API. This is the
+#   recommended approach for Espressif components per their docs.
+
+dependencies:
+  espressif/usb_host_uac: "^1.3.0"

@@ -1,132 +1,165 @@
-# NanoJS8 — Default Kconfig overrides
+# ============================================================================
+# sdkconfig.defaults — NanoJS8 v0.7 (T-Deck port)
 #
-# This file is read by the build system on every clean build. Once sdkconfig
-# exists (after first `idf.py reconfigure`), this file is ignored unless
-# explicitly re-applied. Treat it as the project's source-controlled config
-# baseline; never edit sdkconfig directly.
+# Layer 1 scope: scaffolding only. This file ALREADY contains the full
+# v0.7 production config so we don't have to revisit it layer by layer.
+# Future layers add components via their own REQUIRES, not new sdkconfig.
+# ============================================================================
 
-# ----------------------------------------------------------------------------
-# Target & toolchain
-# ----------------------------------------------------------------------------
+# --- Target ---
+# T-Deck (and T-Deck Plus) use ESP32-S3FN16R8: 16 MB flash, 8 MB Octal PSRAM.
 CONFIG_IDF_TARGET="esp32s3"
 
-# C++ exceptions — REQUIRED for Phase 3a's VCP CP210x driver.
-# espressif/usb_host_vcp and usb_host_cp210x_vcp use 'throw' for error
-# propagation; building them with -fno-exceptions fails with
-# "exception handling disabled" errors. Cost is ~30 KB binary size.
-CONFIG_COMPILER_CXX_EXCEPTIONS=y
-CONFIG_COMPILER_CXX_RTTI=n
-CONFIG_COMPILER_OPTIMIZATION_PERF=y
-CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y
+# --- Flash ---
+# T-Deck has 16 MB. Matches our partition table allocations.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
 
-# ----------------------------------------------------------------------------
-# Partition table
-# ----------------------------------------------------------------------------
-CONFIG_PARTITION_TABLE_CUSTOM=y
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
-CONFIG_PARTITION_TABLE_OFFSET=0x8000
-
-# ----------------------------------------------------------------------------
-# Flash
-# ----------------------------------------------------------------------------
-CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
-CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
-CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
-
-# ----------------------------------------------------------------------------
-# CPU
-# ----------------------------------------------------------------------------
-CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
-CONFIG_FREERTOS_HZ=1000
-
-# ----------------------------------------------------------------------------
-# Logging
-# ----------------------------------------------------------------------------
-CONFIG_LOG_DEFAULT_LEVEL_INFO=y
-CONFIG_LOG_MAXIMUM_LEVEL_VERBOSE=y
-CONFIG_LOG_COLORS=y
-
-# ----------------------------------------------------------------------------
-# Console — Phase 3a: USB-C goes to USB-OTG host duty (DigiRig + radio),
-# so the console moves to UART0 on GPIO 1 (TX) / GPIO 2 (RX) accessed via
-# the Cardputer ADV's Grove port. Operators connect an external USB-UART
-# cable to the Grove port to see logs and issue commands.
+# --- PSRAM ---
+# Required for Phase 4 (gfsk8 decoder) and forward. Octal SPI is what the
+# ESP32-S3R8 variant on the T-Deck has. 80 MHz is the standard rate.
 #
-# Pin map (Grove on Cardputer ADV):
-#   Pin 1 (Black/GND)  — GND
-#   Pin 2 (Red/5V)     — leave unconnected (Cardputer self-powers)
-#   Pin 3 (Yellow/G1)  — GPIO 1 — ESP TX → cable RX
-#   Pin 4 (White/G2)   — GPIO 2 — ESP RX → cable TX
+# CRITICAL: this is what made Phase 4 viable. Without PSRAM, the gfsk8
+# library doesn't fit. With it, we have 8 MB of additional working memory
+# accessible via heap_caps_malloc(MALLOC_CAP_SPIRAM).
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+# Do NOT have WiFi/lwIP try to allocate from PSRAM until we explicitly want
+# it to. Phase 4 needs PSRAM headroom; WiFi can compete later.
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=n
+
+# --- Console ---
+# Default: UART0 routed to T-Deck Grove pins (GPIO 43 TX, GPIO 44 RX).
+# This survives usb_host_install() because UART0 is a different peripheral
+# from USB-Serial-JTAG.
 #
-# Phase 0/1/2 used CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y. Phase 3a flips
-# to UART0_CUSTOM. Flashing still happens via the USB-C port — the ROM
-# bootloader's USB-CDC activates in DOWNLOAD mode regardless of the
-# running firmware's console choice.
-# ----------------------------------------------------------------------------
-CONFIG_ESP_CONSOLE_UART_CUSTOM=y
-CONFIG_ESP_CONSOLE_UART=y
-CONFIG_ESP_CONSOLE_UART_CUSTOM_NUM_0=y
+# On T-Deck Plus, these pins are taken by the GPS module. The Plus build
+# will need to switch to USB-Serial-JTAG console (when the radio service
+# is stopped) or rely solely on the on-screen UI. Phase 6 work.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 CONFIG_ESP_CONSOLE_UART_NUM=0
-CONFIG_ESP_CONSOLE_UART_TX_GPIO=1
-CONFIG_ESP_CONSOLE_UART_RX_GPIO=2
 CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
-CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+CONFIG_ESP_CONSOLE_UART_TX_GPIO=43
+CONFIG_ESP_CONSOLE_UART_RX_GPIO=44
+# Explicitly disable USB-Serial-JTAG console to avoid contention.
+# CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG is not set
 
-# ----------------------------------------------------------------------------
-# USB OTG host stack — required by nanojs8_radio component.
-# Balanced FIFO bias gives IN 408 / OUT 192 bytes, which comfortably fits
-# DigiRig CM108's mono 16-bit 48 kHz audio (96 B/dir/ms) with margin for
-# concurrent CDC traffic on the PTT port. See Phase 3a design notes.
+# --- C++ ---
+# v0.6.0 enabled exceptions. Carry forward for the same reasons (some
+# managed components use try/catch in their initialization paths).
+CONFIG_COMPILER_CXX_EXCEPTIONS=y
+CONFIG_COMPILER_CXX_EXCEPTIONS_EMG_POOL_SIZE=512
+# L7.4b: allow .bss segment in PSRAM. gfsk8's RxAudioBuffer dec_data
+# is 1.44 MB; placing it in PSRAM keeps internal DRAM available for
+# normal allocations. Globals tagged EXT_RAM_BSS_ATTR get the placement.
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+
+# --- USB Host (Layer 5 production config) ---
+# PERIODIC_OUT bias is REQUIRED for 48 kHz stereo TX on CM108/CM119-family
+# audio adapters. With the default BALANCED setting, the ESP32-S3 USB host
+# periodic OUT FIFO caps at 128 bytes/microframe, which rejects the 200-byte
+# wMaxPacketSize that these adapters declare for their stereo TX endpoint
+# (48 kHz × 2 ch × 2 bytes = 192 B/ms requires a 200-byte buffer).
 #
-# External hub support is required for the powered-hub test setup (Belkin
-# F4U022 etc.). Without this the host stack sees a hub but refuses to
-# enumerate it, so DigiRig (connected to a hub downstream port) is invisible.
-# Multi-level support is irrelevant for our single-hub topology but is
-# included for free since it's default-on once HUBS_SUPPORTED is enabled.
+# Verified empirically in tdeck_usb_mps_diag (Run 3 PERIODIC_OUT passed both
+# rates, Runs 1 & 2 BALANCED/IN failed) and tdeck_usb_sustain (149-second
+# bidirectional streaming at 191968 B/s TX + 96000 B/s RX, zero failures,
+# audible 1 kHz sine tone confirmed end-to-end via headphones).
 #
-# (CONFIG_USB_OTG_SUPPORTED is a hidden auto-symbol on ESP32-S3; the
-# host stack components below pull it in transitively. We don't need
-# to assert it here.)
-# ----------------------------------------------------------------------------
-CONFIG_USB_HOST_HW_BUFFER_BIAS_BALANCED=y
+# Espressif issue #14941 (closed "Won't Do") claims none of the bias
+# settings affect periodic OUT MPS — this is incorrect for ESP-IDF v5.5.4
+# on ESP32-S3 rev v0.2, per our measurements.
+CONFIG_USB_HOST_HW_BUFFER_BIAS_PERIODIC_OUT=y
+
+# Hub support is REQUIRED for the DigiRig Mobile, which contains a USB2412
+# internal hub bridging the CM108 audio device and the CP2102 serial bridge.
 CONFIG_USB_HOST_HUBS_SUPPORTED=y
 
-# ----------------------------------------------------------------------------
-# WiFi / BLE — disabled in v1.0 per spec.
-# Leaving the radio stack out saves ~120 KB flash and ~30 KB DRAM.
-# Kconfig flag CONFIG_NANOJS8_ENABLE_BLE will toggle these on for variant builds.
-# ----------------------------------------------------------------------------
-# (Both are off by default in IDF starter; we just don't enable them.)
-
-# ----------------------------------------------------------------------------
-# Memory
-# ----------------------------------------------------------------------------
-# Allow heap allocations to walk into 8-bit-accessible IRAM if DRAM runs out.
-# This is the same setting Mini-FT8 uses on Cardputer ADV.
-CONFIG_HEAP_PLACE_FUNCTION_INTO_FLASH=y
-
-# Panic behavior: AUTO-REBOOT rather than halt.
-#
-# Why: NanoJS8 is a field radio appliance and reliability is the top
-# priority. ESP-IDF's experimental external-hub driver (ext_hub.c) can
-# assert/panic on USB enumeration errors with composite devices that
-# contain an internal hub (e.g. DigiRig) — an upstream bug we can't fix
-# without vendoring the core usb component. Previously PANIC_PRINT_HALT
-# left the device dead ("CPU halted") needing a manual power cycle. With
-# auto-reboot, any such panic becomes a ~2 second self-recovery instead.
-# The core dump is still written to flash first (see below), so we lose
-# no post-mortem diagnostics. The (tr)uSDX path avoids the hub bug
-# entirely, but this is defense-in-depth for every code path.
+# --- Crash and recovery ---
+# Reboot on panic (don't halt — we want to keep running in the field).
+# Core dumps to flash for post-mortem analysis on the dev workstation.
 CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
-CONFIG_ESP_DEBUG_STUBS_ENABLE=y
-
-# Stack size for the main task (where app_main runs). Default is 3584; we bump
-# to 8192 for safety during init.
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
-
-# ----------------------------------------------------------------------------
-# Core dump on panic — written to coredump partition for post-mortem.
-# ----------------------------------------------------------------------------
 CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
-CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+
+# --- Partition table ---
+# Custom partition layout for 16 MB flash with OTA slots and storage.
+# See partitions.csv for details.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# --- Task Watchdog (L7.11g.1-fix3: minimal-config model) ---
+# Two heavy tasks pin to CPU 1 with legitimately long blocking phases:
+#   - tx_audio's tx_worker: pre-modulates ~2 s/frame for up to 8 frames
+#     back-to-back (~16 s peak), then sleeps in a single big vTaskDelay
+#     to align with the JS8 slot boundary (up to ~15 s wait), then
+#     streams 13 s/frame audio through blocked USB writes per chunk.
+#   - js8sync's sync_task: runs LDPC decode chains over up to 30
+#     candidates per slot (3-7 s of contiguous CPU on busy bands).
+#
+# History: g.1 + g.1-fix1 + g.1-fix2 attempted to make these tasks
+# explicit WDT subscribers (esp_task_wdt_add/reset). Each on-air round
+# uncovered yet another legitimate blocking path the resets had missed
+# (streaming chunks, silence chunks, poll-top, post-block-feed, slot-
+# target-wait, ...). Empirically the subscribe+reset model doesn't fit
+# tasks with this many distinct long-blocking phases.
+#
+# g.1-fix3 pivot: no task-level subscriptions. Two minimal configs:
+#   (1) CONFIG_ESP_TASK_WDT_TIMEOUT_S=15 — bump from default 5 s →
+#       15 s. This alone absorbs all the smaller legitimate bursts.
+#   (2) CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n — disable IDLE1
+#       monitoring. CPU 1 is by design saturated during multi-frame
+#       pre-mod plus busy decode; IDLE1 starvation is not a bug.
+#       IDLE0 monitoring (CPU 0: UI, USB Host, main_task) stays
+#       enabled — CPU 0 is never legitimately saturated, so IDLE0
+#       starvation IS always a real bug worth catching.
+#
+# Application-level monitoring covers the gap that task subscriptions
+# would have filled: PTT watchdog (20 s default, 125 s during multi-
+# frame burst) catches a hung TX worker; heartbeat log reports
+# js8sync slot count + decode totals every 30 s so a hung decoder is
+# operator-visible. Zero spurious WDT trips during normal operation.
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=15
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n
+
+# --- Main task stack (L7.11g.3-fix1) ---
+# ESP-IDF default for CONFIG_ESP_MAIN_TASK_STACK_SIZE is 3584 bytes
+# (3.5 KB). That has always been marginal for this firmware:
+#
+#   - The heartbeat printer runs on main_task (main.c ~line 738). It's
+#     a single ESP_LOGI with ~30 format args (PRIu32 + uint64_t + many
+#     strings). The vprintf chain alone uses 1.5-2 KB of stack to
+#     process all the conversions.
+#
+#   - The active screen's render() also runs on main_task. Several
+#     screens declare large local arrays in their picker paths — e.g.
+#     screen_compose's picker fills nanojs8_activity_heard_t heard[16]
+#     on the stack (~1 KB) plus other locals.
+#
+#   - L7.11a-fix1 already documented that the encode chain
+#     (regex_search + LDPC) needs 14-20 KB on its own; the fix there
+#     was to spawn a one-shot 32 KB task for the self-test. That helps
+#     the SEND path but the heartbeat-on-main and render-on-main paths
+#     still share whatever main_task has, and those alone got close
+#     to the 3.5 KB limit under the prior layout.
+#
+# Symptom: L7.11g.3 added ~2.5 KB of BSS (two new screen modules with
+# static snapshots + tables) and tipped the layout. Verification on
+# T-Deck Plus crashed with "Stack overflow in task main" twice — both
+# crashes happening immediately after a heartbeat log line, while
+# COMPOSE was the active screen. The panic backtrace was all 0x4037xxxx
+# (IRAM panic handlers) — the actual offender wasn't recoverable from
+# the trace, but the pattern (post-heartbeat, mid-render) and the
+# stack pointer offsets confirmed main_task as the culprit.
+#
+# Fix: double the main task stack from 3584 → 8192 bytes. 8 KB gives
+# comfortable headroom for heartbeat + render + future screens + any
+# unforeseen locals, with a 4.5 KB internal-RAM cost we can easily
+# afford (163 KB free at boot). Not high enough to support the encode
+# chain — that stays on its own one-shot 32 KB task per L7.11a-fix1.
+#
+# IDLE0 watchdog will catch any future runaway on main_task (per the
+# g.1-fix3 WDT model).
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

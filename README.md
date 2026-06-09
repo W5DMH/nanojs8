@@ -1,341 +1,167 @@
 # NanoJS8
 
-A pocket JS8 amateur-radio transceiver controller for the M5Stack Cardputer ADV.
+A pocket JS8 amateur-radio transceiver firmware for the **LilyGO T-Deck Plus** (ESP32-S3, 16&nbsp;MB flash, 8&nbsp;MB PSRAM).
 
-NanoJS8 ports the MicroJS8 (W5DMH, Pi Zero 2W Python) user experience to the
-ESP32-S3 platform in ESP-IDF / FreeRTOS / C++. It replicates MicroJS8's screen
-ring, protocol grammar, and operating ergonomics on a pocket-sized device with
-a built-in keyboard and display.
+**Status:** Pre-alpha. On-air verified for bidirectional MSG / ACK on 40&nbsp;m JS8 Normal between W5DMH and KD8PGB. Plenty of rough edges remain — see the [Status](#status) section.
 
-**Status: Phase 3.5 - Power Management.** Adds a dedicated power
-subsystem on top of Phase 3a: smoothed battery telemetry (shown on HOME
-and via `radio status`/`power`), a charge mode (Ctrl+C on the keyboard or
-`charge` over serial) that turns the screen off so the battery actually
-charges at a usable rate, idle screen dimming/blanking to save power in
-the field, and low/critical-battery load shedding. NVS schema migrated
-v3 → v4 (idle timeouts + dim level). See "Power management" below for the
-hardware reality of charging this device.
-
-Phase 3a (DigiRig + RTS-PTT) remains: USB host enumerates the DigiRig
-(UAC audio + CP2102 serial), asserts PTT via the CP2102 RTS line, and
-HOME shows live radio status. Console is on UART0/Grove. See
-[Build Specification §11](docs/) for the phased delivery plan.
-
-**License: GPL-3.0.** Inherits from gfsk8-modem-clean (jfrancis42) and
-MicroJS8 lineage.
+> **Install in one click:** [w5dmh.github.io/nanojs8](https://w5dmh.github.io/nanojs8/)
 
 ---
 
 ## Hardware
 
-- M5Stack Cardputer ADV (ESP32-S3FN8, 8 MB flash, no PSRAM)
-- microSD card (mandatory from Phase 4 onward; optional for Phase 0)
-- M5Stack Cap LoRa-1262 (for GPS — added in Phase 6)
+| Item | Notes |
+|---|---|
+| LilyGO T-Deck Plus | ESP32-S3FN16R8, GPS, 16 MB flash, 8 MB PSRAM. The "Plus" variant matters — the GPS module and PSRAM are not in the standard T-Deck. |
+| Radio interface | DigiRig (or any USB sound card + RTS-PTT adapter). Verified profile: `digirig-rts-only`. |
+| USB-C Y-cable | So the T-Deck Plus and the DigiRig audio adapter can both be powered while connected. |
+| HF SSB transceiver | Any radio that accepts PTT input. Verified on Xiegu G90 (`xiegu-g90-digirig` profile adds CI-V CAT). |
 
-## Toolchain
+## Install (for testers)
 
-- ESP-IDF **v5.5.4** (pinned — see [BUILD_ENVIRONMENT.md](BUILD_ENVIRONMENT.md))
-- Windows 11 + PowerShell (primary) — Linux supported via parallel `.sh` scripts
-- Optional: VS Code with the official Espressif ESP-IDF extension
+**Easiest path:** [w5dmh.github.io/nanojs8](https://w5dmh.github.io/nanojs8/) — connect the T-Deck Plus over USB, click Install, done. Chrome or Edge on a desktop OS only (Web Serial requirement).
 
----
+**Manual path:** Download `nanojs8-merged.bin` from the [latest release](https://github.com/W5DMH/nanojs8/releases/latest), then:
 
-## Quickstart — Windows 11
+```bash
+esptool.py --chip esp32s3 --port <COMx> write_flash 0x0 nanojs8-merged.bin
+```
 
-These steps assume ESP-IDF v5.5.4 is already installed at `C:\esp\v5.5.4\esp-idf`.
-If not, see the [installation guide](https://docs.espressif.com/projects/esp-idf/en/v5.5.4/esp32s3/get-started/index.html)
-or [BUILD_ENVIRONMENT.md](BUILD_ENVIRONMENT.md) for the exact procedure.
+After flashing, first-boot setup is on the device's SETUP screen:
+1. Enter callsign and Maidenhead grid (e.g. `EN83`)
+2. Pick your radio profile
+3. Tune the radio to **7.078 MHz USB** (the JS8 calling frequency on 40 m)
+4. Plug in the DigiRig (or your USB audio adapter) via the Y-cable
+5. UTC syncs automatically via GPS within a few minutes of getting sky visibility. You can also enter UTC manually on SETUP row 6.
+
+## Status
+
+Honest checklist of what's working and what isn't:
+
+✅ Working today:
+- JS8 Normal mode RX with full LDPC decode
+- Multi-frame MSG reception and re-assembly
+- Auto-ACK on received MSG verbs
+- Multi-frame TX (up to 7+ frames verified on-air)
+- INBOX with NVS persistence across reboots
+- Heartbeat TX
+- HEARD / DIRECTED / ALL activity screens
+- GPS UTC sync (T-Deck Plus on-board u-blox MIA-M10Q)
+- DigiRig / Xiegu G90 CAT via Icom CI-V
+
+🚧 Known limitations:
+- JS8 Normal mode only — Slow / Fast / Turbo not yet implemented
+- Sensitivity is below desktop JS8Call (~3-6 dB depending on conditions)
+- Audio level handling is manual — peak above ~28000 starts clipping and reducing decode margin; we don't warn yet
+- Compound callsigns with slash prefix (e.g. `KH6/W5DMH`) get a placeholder `<...>` in HEARD displays
+- LoRa radio (SX1262) is held in reset — not yet a radio interface
+- Touch screen is unused; trackball + keyboard only
+
+❌ Not yet:
+- Direct FT8 or other digital-mode interop
+- Internet / APRS-IS gateway
+
+## Build from source (developers)
+
+Requires **ESP-IDF v5.5.4** at `C:\esp\v5.5.4\esp-idf` (Windows) or `~/esp/v5.5.4/esp-idf` (Linux/macOS).
+
+### Two build profiles
+
+| Profile | Use case | Console | GPS |
+|---|---|---|---|
+| **dev** | Local development with Pi monitor on `/dev/serial0` | UART0 on Grove pins (GPIO 43 TX, 44 RX) | OFF |
+| **release** | Public test build (what CI ships) | USB Serial-JTAG over USB-C | ON |
+
+### Dev build (your normal workflow)
 
 ```powershell
-# 1. Activate the IDF environment (do this in every new PowerShell window):
+# Windows PowerShell
 & "C:\esp\v5.5.4\esp-idf\export.ps1"
-
-# 2. Change into the project folder:
-cd C:\dev\nanojs8
-
-# 3. Fetch vendored M5Stack libraries (one-time, ~2-3 min on a fast link):
-.\tools\fetch_components.ps1
-
-# 4. Stage the gfsk8 modem upstream (Phase 4 prep — optional for Phase 0):
-.\tools\apply_gfsk8_patches.ps1
-
-# 5. Set the chip target:
-idf.py set-target esp32s3
-
-# 6. Build (~5-10 min on a modern machine for the first build):
-idf.py build
-
-# 7. Connect the Cardputer ADV via USB-C, find its COM port in Device
-#    Manager (Ports > USB JTAG/serial debug unit (COMx)), then flash:
-idf.py -p COM11 flash
-
-# Phase 3a note: `idf.py monitor` over the USB-C port no longer works
-# because the running firmware's console moved to UART0 / Grove. Connect
-# an external USB-UART cable to the Grove port (GPIO 1 TX, GPIO 2 RX, GND)
-# and use:
-#   idf.py -p COMyy monitor
-# where COMyy is the FTDI cable's COM port. See "Phase 3a hardware setup"
-# below.
+idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.dev" build
+idf.py -p COM5 flash monitor
 ```
 
-Replace `COM11` with the actual COM port shown in Device Manager.
-
-To exit `monitor`: `Ctrl+]`.
-
----
-
-## Power management
-
-NanoJS8 is a dedicated-firmware appliance, so it owns power and charge
-management itself (there's no launcher underneath). The Cardputer ADV has
-two hardware realities that shape this:
-
-**1. Charging is slow by design.** The charge IC pulls only ~300 mA from
-USB regardless of the supply (a 2.5 A power bank doesn't charge it any
-faster). Whatever the running firmware consumes is subtracted from that,
-so with the screen on, almost nothing reaches the battery. The fix is
-**Charge Mode**, which turns the screen off so the bulk of the ~300 mA
-goes to the cell.
-
-- Enter Charge Mode: **Ctrl+C** on the Cardputer keyboard, or `charge`
-  over the serial console. Screen goes off; the device keeps charging.
-- Exit: **any keypress**, or `charge off` over serial.
-- Expect roughly 6-8 hours for a full charge in Charge Mode (vs. ~28 hrs,
-  or never, with the screen on). This is a hardware limit, not a bug.
-- The power switch must be **ON** to charge (per M5Stack).
-
-**2. The single USB-C port can't host a radio and charge at the same
-time.** During radio operation the USB-C port is busy driving the DigiRig
-as a USB host, so it can't also accept charge power. For extended radio
-sessions, use a **powered USB hub** or a **power-injecting Y-cable** so
-the DigiRig (and the Cardputer) get external 5 V. On battery alone, a USB
-radio interface will drain the cell.
-
-### Battery telemetry
-
-Battery percentage shows in the upper-right corner of HOME, color-coded:
-green (normal), amber (≤20%), red (≤10%). The `power` serial command
-shows detail (voltage, level, charge mode, idle state, settings), and
-`radio status` includes a battery line.
-
-### Idle screen management
-
-To save power in the field, the screen dims after a period of no
-keypresses and blanks after a longer period. Any keypress restores full
-brightness. Blanking is display-only — it never interrupts the radio
-service, so an unattended receive session keeps running with the screen
-off. Defaults: dim at 2 min, blank at 5 min. Adjust over serial:
-
-```
-power dim <sec>      # seconds idle before dimming (0 disables)
-power off <sec>      # seconds idle before blanking (0 disables)
-power bright <pct>   # backlight percent when dimmed
+```bash
+# Linux / macOS
+. ~/esp/v5.5.4/esp-idf/export.sh
+idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.dev" build
+idf.py -p /dev/ttyUSB0 flash monitor
 ```
 
-Settings persist in NVS (schema v4).
-
-### Low / critical battery
-
-At ≤20% (LOW) the HOME indicator turns amber and a warning is logged. At
-≤10% (CRITICAL) the indicator turns red and the radio service is stopped
-to shed load and protect the cell. No forced shutdown — the operator
-stays in control; the device just stops the biggest power draw and warns.
-
-
-
-Phase 3a uses the USB-C port for **OTG host duty** (talking to a DigiRig and
-its attached radio). That means the console must move off USB-Serial-JTAG. The
-new console lives on **UART0** routed to the **Grove port** (GPIO 1 = TX,
-GPIO 2 = RX), which means you need an external USB-UART cable to see logs and
-issue serial commands.
-
-### What you need
-
-- A USB-A-to-TTL UART cable (any FTDI FT232RL / CP2102 / CH340 dongle, ~$5)
-- The Cardputer ADV's Grove connector (4-pin HY2.0)
-- A powered USB hub (or USB-C Y-cable with power injection) for the OTG side
-
-### Grove-to-USB-UART wiring
-
-| Cardputer Grove pin | Signal | USB-UART cable pin |
-|---|---|---|
-| 1 (Black) | GND | GND |
-| 2 (Red) | 5V | **leave unconnected** (Cardputer self-powers) |
-| 3 (Yellow / G1) | GPIO 1 → ESP TX | cable RX |
-| 4 (White / G2) | GPIO 2 → ESP RX | cable TX |
-
-Console baud is 115200 8N1.
-
-### Daily workflow
-
-1. **Flash:** plug USB-C → PC, run `idf.py -p COMxx flash`. The ROM bootloader's
-   own USB-CDC handles the flash regardless of where the running firmware's
-   console is.
-2. **Monitor:** connect the USB-UART cable to your PC, find its COM port,
-   run `idf.py -p COMyy monitor` (where `COMyy` is the FTDI cable, not the
-   Cardputer's USB-C).
-3. **Test radio:** unplug the Cardputer's USB-C from the PC, plug it into a
-   powered hub. Connect the DigiRig to a hub port. Logs still flow through
-   the Grove/FTDI cable.
-
-### Serial commands
-
-Type at the `nanojs8>` prompt over the UART monitor:
-
-- `radio start` — start the USB host stack, enumerate the DigiRig
-- `radio stop` — release USB devices, stop the radio service
-- `radio status` — dump current state, profile, PTT state, frame counters
-- `ptt on` / `ptt off` — manually assert/release PTT (CP2102 RTS line)
-- `help` — list registered commands
-
-To make the service start automatically at boot, set `AUTOSTART: on` on the
-SETUP screen. (Default is OFF so a fresh device behaves like Phase 0/1/2.)
-
----
-
-## Definition of Done — Phase 3a
-
-Phase 3a DoD is split into two tiers:
-
-### Tier 1 — buildable & boots cleanly (no DigiRig required)
-
-1. CI build succeeds; binary < 1 MB.
-2. Splash shows `v0.3.0` and `Phase 3a - DigiRig + RTS-PTT`.
-3. Free DRAM at boot > 200 KB.
-4. Console comes up on UART0 at 115200 baud via Grove with the `nanojs8>` prompt.
-5. `help` lists `radio` and `ptt` commands.
-6. With nothing plugged into the USB-C port: `radio start` → service enters
-   `ENUMERATING` state, HOME's CAT row reads `Waiting...`.
-7. Plug an unrelated USB device (e.g. a phone) → enumerate log appears,
-   `radio status` shows `enum_attempts > 0` but no profile match. CAT stays
-   `Waiting...`.
-8. Unplug → CAT returns to `Waiting...` within 2 s. No hangs across 10+
-   plug/unplug cycles.
-9. `radio stop` → CAT returns to `Disconnected`.
-10. NVS migration from Phase 2 v2 → v3 preserves CALL/GRID/RADIO/GROUPS,
-    defaults AUTOSTART to off.
-11. SETUP shows 5 fields including AUTOSTART; toggle saves and persists.
-12. Phase 0/1/2 behavior preserved (ring nav, NVS, validators, banners).
-
-### Tier 2 — with DigiRig + powered hub + radio (full end-to-end)
-
-1. Plug DigiRig (audio + serial) into powered hub, hub into Cardputer USB-C.
-2. Within 2 s of `radio start`: HOME's CAT row reads `DigiRig RTS-PTT`.
-3. `radio status` shows `status: CONNECTED`, `rx_frames > 0` and increasing.
-4. `ptt on` → multimeter confirms CP2102 RTS line goes high; HOME shows
-   `DigiRig RTS-PTT *TX*` in red.
-5. `ptt off` → RTS goes low; HOME's red indicator clears.
-6. PTT held for 20+ s without `ptt off` → auto-released by the watchdog;
-   serial log shows the timeout warning.
-7. Unplug DigiRig while PTT asserted → RTS released as a side effect of
-   close; HOME returns to `Waiting...`.
-
-
-
-After flash and one power cycle, the Cardputer ADV should:
-
-1. Show the Phase 0 splash briefly (~1.2 s), then transition to the **SETUP** screen.
-2. SETUP shows three fields: `CALL`, `GRID`, `RADIO`. The first is focused.
-3. **Tab** moves focus through the fields in order, wrapping at the end.
-4. **Enter** on a focused field enters EDIT mode.
-   - Text fields (CALL, GRID): type to append, Backspace to delete, Enter to commit, Fn+\` to cancel.
-   - Menu field (RADIO): Fn+`;` / Fn+`.` cycle options, Enter to commit, Fn+\` to cancel.
-5. **Ctrl+S** at any time saves all fields to NVS. A green "Saved" banner appears for ~1.5 s.
-6. Committing a field with an invalid value (e.g. callsign with `?`) shows a red "Invalid value" banner; the field stays in edit mode until the operator fixes it or presses Esc.
-7. **Power cycle** the device — the saved values are still there.
-8. On first boot with empty NVS, the defaults are `NOCALL` / `AA00` / `qdx`. The serial log warns that the placeholder callsign needs replacing.
-
-### Key bindings (mirrors MicroJS8)
-
-| Action | Key |
-|---|---|
-| Next field | Tab |
-| Enter / exit edit mode | Enter / Fn+\` (Esc) |
-| Cycle menu options | Fn+`;` (up) / Fn+`.` (down) |
-| Save all | Ctrl+S |
-| Previous / next screen (Phase 2+) | Fn+`,` / Fn+`/` |
-
----
-
-## Definition of Done — Phase 0
-
-After `flash monitor`, the Cardputer ADV display should show:
-
-```
-NanoJS8 v0.0.1
-Phase 0 — boot diag
-
-Chip:      ESP32-S3 rev v0.2
-Free DRAM: <N> KB
-SD:        Present  (or "Not Found" if no SD card)
-
-Built <date> <time>
-[Phase 0 boot diagnostic]
+For console monitoring with the Pi UART cable on `/dev/serial0`:
+```bash
+picocom -b 115200 /dev/serial0
 ```
 
-The serial monitor will show the same information logged via `ESP_LOGI`.
+### Release build (CI runs this; can run locally to test)
 
-**Pass criteria:**
-- Splash visible on the Cardputer ADV display
-- Free DRAM >= 200 KB (with SD mounted)
-- SD status correctly reflects whether a card is inserted
+```bash
+idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.release" build
+idf.py merge-bin    # produces build/nanojs8-merged.bin
+```
 
-If those three are true, Phase 0 is complete and we move to Phase 1.
-
----
-
-## Project layout
+### Project layout
 
 ```
 nanojs8/
-├── CMakeLists.txt              project root
-├── partitions.csv              8 MB layout
-├── sdkconfig.defaults          baseline Kconfig overrides
-├── main/                       app entry point
-├── components/
-│   ├── board_cardputer_adv/    Cardputer hardware init (forked from Mini-FT8)
-│   ├── gfsk8_modem/            JS8 modem (vendored in Phase 4)
-│   ├── nanojs8_config/         NVS-backed configuration
-│   ├── nanojs8_radio/          Phase 3a: USB host + UAC + CP2102 PTT
-│   ├── nanojs8_ui/             input + screen router + screens
-│   ├── usb_host_uac/           vendored from Mini-FT8 (registry regression workaround)
-│   ├── M5Cardputer/            display + keyboard library  (vendored, patched)
-│   ├── M5GFX/                  graphics library            (fetched by script)
-│   └── M5Unified/              power + sensors library     (fetched by script)
-├── tools/
-│   ├── fetch_components.ps1    pull M5Stack libs at pinned versions
-│   ├── apply_gfsk8_patches.ps1 clone + patch JS8 modem
-│   └── check_dram_budget.py    POST_BUILD memory check
-└── docs/
-    └── ...                     (Build Specification lives at repo root)
+├── main/                       app entry + Kconfig.projbuild
+├── components/                 ~25 in-tree components
+│   ├── nanojs8_js8_codec/      JSC codec + JS8 encode/decode
+│   ├── nanojs8_js8_sync/       Sync detector + LDPC decode driver
+│   ├── nanojs8_ft8_lib/        ft8_lib (vendored, JS8-customized)
+│   ├── nanojs8_gfsk8/          Varicode + pack/unpack (vendored)
+│   ├── nanojs8_rx_audio/       USB UAC → 12 kHz decimator + slot trigger
+│   ├── nanojs8_tx_audio/       12 kHz → 48 kHz upsample + USB UAC out
+│   ├── nanojs8_tx_queue/       Outbound message queue + drain task
+│   ├── nanojs8_mailbox/        INBOX with NVS persistence
+│   ├── nanojs8_activity/       HEARD / DIRECTED tables
+│   ├── nanojs8_gps/            u-blox NMEA parser + UART driver
+│   ├── nanojs8_ui/             Screen router + 9 screens
+│   ├── nanojs8_display/        ST7789 panel driver
+│   ├── nanojs8_keyboard/       T-Deck I²C keyboard (0x55)
+│   ├── nanojs8_trackball/      T-Box rotary input
+│   ├── nanojs8_ptt/            RTS-PTT + watchdog
+│   ├── nanojs8_cat/            CAT facade
+│   ├── nanojs8_cat_civ/        Icom CI-V protocol
+│   ├── nanojs8_radio/          Profile registry
+│   ├── nanojs8_usb_audio/      UAC host
+│   ├── nanojs8_usb_serial/     CDC-ACM host (CP2102 etc.)
+│   ├── nanojs8_platform_tdeck/ Board init (POWERON, I²C, LoRa hold-reset)
+│   ├── nanojs8_jsc_map/        JSC dictionary partition reader
+│   ├── nanojs8_time/           UTC anchor + slot math
+│   └── nanojs8_config/         NVS-backed station config
+├── assets/                     JSC dictionary source (≥ 262144 entries)
+├── docs/                       GitHub Pages site + ESP Web Tools manifest
+├── .github/workflows/          build.yml + release.yml (CI)
+├── partitions.csv              16 MB layout
+├── sdkconfig.defaults          shared baseline Kconfig
+├── sdkconfig.dev               dev-build overlay (console UART0, GPS off)
+├── sdkconfig.release           release-build overlay (console USB-JTAG, GPS on)
+└── CMakeLists.txt              project root
 ```
 
----
+### Releasing
 
-## Troubleshooting
+CI builds the release profile, calls `idf.py merge-bin`, attaches the binaries to a GitHub Release, and deploys [w5dmh.github.io/nanojs8](https://w5dmh.github.io/nanojs8/) with the new version. Trigger:
 
-**`idf.py: command not found`** — you didn't activate ESP-IDF. Run
-`& "C:\esp\v5.5.4\esp-idf\export.ps1"` in your current PowerShell window.
+```bash
+git tag v0.7.0-alpha
+git push --tags
+```
 
-**`fatal error: M5Cardputer.h: No such file or directory`** — you haven't run
-`tools\fetch_components.ps1` yet. The M5Stack libraries are downloaded by
-that script, not committed to the repo.
+The workflow file [`.github/workflows/release.yml`](.github/workflows/release.yml) handles the rest.
 
-**`Failed to connect to ESP32-S3`** — check the COM port number in Device
-Manager. Try holding the G0 key while plugging in the USB-C cable, then
-releasing G0 after `esptool` connects.
+## License
 
-**SD card shows "Not Found" with a card inserted** — Phase 0 uses
-conservative SPI settings (5 MHz). Some older or low-quality cards may not
-enumerate at all on the first cold boot. Try a different card, then file
-an issue with the brand and capacity.
+GPL-3.0. Inherits from [gfsk8-modem-clean](https://github.com/jfrancis42/gfsk8-modem-clean) (jfrancis42) and the JS8Call lineage.
 
----
+## Acknowledgments
 
-## See also
+- Jordan Sherer (KN4CRD) and the [JS8Call](http://js8call.com) team for the protocol and reference implementation
+- Joe Taylor (K1JT) for FT8 / FT4 / JT9, on which JS8 builds
+- Karlis Goba (YL3JG) for [ft8_lib](https://github.com/kgoba/ft8_lib), our LDPC and Costas base
+- Jeff Francis for [gfsk8-modem-clean](https://github.com/jfrancis42/gfsk8-modem-clean)
+- LilyGO for the T-Deck Plus hardware
+- KD8PGB and L0LFN for being the first on-air test correspondents
 
-- [BUILD_ENVIRONMENT.md](BUILD_ENVIRONMENT.md) — exact toolchain pin record
-- Build Specification (in the project root) — full design document
-- [Mini-FT8](https://github.com/...) — reference codebase we forked from
-- [MicroJS8](https://github.com/...) — UX reference
-- [gfsk8-modem-clean](https://github.com/jfrancis42/gfsk8-modem-clean) — JS8 modem
+Dan W5DMH · grid EN83 · [github.com/W5DMH/nanojs8](https://github.com/W5DMH/nanojs8)

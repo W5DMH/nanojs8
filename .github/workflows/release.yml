@@ -1,0 +1,178 @@
+name: Release
+
+# On `git push --tags` of a version tag (e.g. v0.7.0-alpha), this workflow:
+#   1. Builds the release profile (GPS on, USB Serial-JTAG console)
+#   2. Runs idf.py merge-bin to produce a single nanojs8-merged.bin
+#   3. Creates a GitHub Release with the merged bin (+ individual parts)
+#      attached so manual / esptool.py installs work too
+#   4. Substitutes the version into docs/manifest.json and copies the
+#      merged bin into docs/ so ESP Web Tools serves it same-origin
+#      (avoids CORS issues with cross-origin Release asset downloads)
+#   5. Deploys docs/ to GitHub Pages
+#
+# After this runs, https://<user>.github.io/<repo>/ shows an "Install"
+# button that flashes the freshly-tagged firmware in one click.
+#
+# Prerequisites (one-time setup in the GitHub repo settings):
+#   • Settings → Pages → Source: "GitHub Actions"
+#   • Settings → Actions → General → Workflow permissions:
+#     "Read and write permissions"  (or rely on the job-level perms below)
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write     # to create the GitHub Release
+  pages: write        # to deploy GitHub Pages
+  id-token: write     # OIDC token for the Pages deployment
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+
+  # ─── Phase 1: build firmware + prepare both Pages and Release artifacts ───
+  build:
+    name: Build & package
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version from tag
+        id: meta
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Building release ${VERSION}"
+
+      - name: Build firmware (release profile)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.4
+          target: esp32s3
+          path: '.'
+          command: |
+            idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.release" build
+            idf.py merge-bin
+
+      - name: Locate merged binary
+        id: bin
+        run: |
+          # idf.py merge-bin writes to build/<project-name>-merged.bin
+          MERGED=$(ls build/*-merged.bin 2>/dev/null | head -1)
+          if [ -z "$MERGED" ]; then
+            echo "ERROR: merged bin not found in build/"
+            ls -la build/
+            exit 1
+          fi
+          echo "Merged binary: $MERGED"
+          cp "$MERGED" nanojs8-merged.bin
+          ls -la nanojs8-merged.bin
+          echo "size=$(stat -c%s nanojs8-merged.bin)" >> $GITHUB_OUTPUT
+
+      - name: Prepare Pages content
+        run: |
+          # Copy the merged binary into docs/ so ESP Web Tools fetches it
+          # from the same origin as the manifest. Avoids CORS issues that
+          # cross-origin GitHub Release asset downloads can trigger.
+          cp nanojs8-merged.bin docs/nanojs8-merged.bin
+          # Substitute version into the manifest
+          sed -i "s/__VERSION__/${{ steps.meta.outputs.version }}/g" docs/manifest.json
+          echo "Manifest preview:"
+          cat docs/manifest.json
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - name: Upload release artifacts (for next job)
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-bins
+          path: |
+            nanojs8-merged.bin
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/nanojs8.bin
+            build/jsc_map.bin
+            build/flasher_args.json
+          if-no-files-found: error
+          retention-days: 7
+
+  # ─── Phase 2: create the GitHub Release with all binaries attached ───────
+  release:
+    name: GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (for release notes)
+        uses: actions/checkout@v4
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-bins
+          path: dist
+
+      - name: Stage artifacts (flatten)
+        run: |
+          mkdir -p release-assets
+          cp dist/nanojs8-merged.bin                          release-assets/
+          cp dist/build/bootloader/bootloader.bin             release-assets/
+          cp dist/build/partition_table/partition-table.bin   release-assets/
+          cp dist/build/nanojs8.bin                           release-assets/
+          cp dist/build/jsc_map.bin                           release-assets/
+          cp dist/build/flasher_args.json                     release-assets/ || true
+          ls -la release-assets/
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.build.outputs.version }}
+          name: NanoJS8 ${{ needs.build.outputs.version }}
+          generate_release_notes: true
+          prerelease: ${{ contains(needs.build.outputs.version, 'alpha') || contains(needs.build.outputs.version, 'beta') || contains(needs.build.outputs.version, 'pre') || contains(needs.build.outputs.version, 'test') }}
+          body: |
+            ## Install
+
+            **One-click (recommended):** https://w5dmh.github.io/nanojs8/ — connect your T-Deck Plus over USB, click Install, done. Requires Chrome or Edge.
+
+            **Manual flash via esptool.py:** Download `nanojs8-merged.bin` from the Assets list below, then:
+            ```
+            esptool.py --chip esp32s3 --port COMx write_flash 0x0 nanojs8-merged.bin
+            ```
+
+            ## What's in this release
+
+            | File | Purpose |
+            |---|---|
+            | `nanojs8-merged.bin` | Single combined image — bootloader + partition table + app + JSC dictionary. Use this for everything. |
+            | `bootloader.bin` | 2nd-stage bootloader only (flashes at 0x0) |
+            | `partition-table.bin` | Partition table only (flashes at 0x8000) |
+            | `nanojs8.bin` | App only (flashes at 0x20000) |
+            | `jsc_map.bin` | JSC dictionary data partition (flashes at 0x420000) |
+            | `flasher_args.json` | esptool flash args, for advanced users |
+
+            ## Auto-generated changelog
+
+          files: release-assets/*
+
+  # ─── Phase 3: deploy the Pages site (now that the release exists) ────────
+  deploy-pages:
+    name: Deploy Pages
+    needs: [build, release]
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
