@@ -19,7 +19,7 @@ NanoJS8 is designed for the **LilyGO T-Deck Plus** specifically — the "Plus" v
 | **DigiRig Mobile** | USB audio + RTS-PTT (verified). Other USB sound-card adapters with RTS PTT should work but are untested. | [digirig.net](https://digirig.net) |
 | **OTG Y-cable** | Lets the T-Deck Plus act as USB host (audio adapter) while still drawing 5 V from a power supply. Without this, the device runs the radio off its tiny internal battery and drains in ~30 minutes. | [Amazon (recommended)](https://www.amazon.com/dp/B098SVSDYW) |
 | **USB 5 V power source** | We recommend the **Talentcell Rechargeable 12 V 3000 mAh Lithium-ion Battery Pack** — its 5 V USB output keeps the T-Deck Plus + DigiRig + radio interface fed for many hours of operation in the field. | Talentcell (Amazon) |
-| **HF SSB transceiver** | Any radio with a 3.5 mm PTT line. See verified models below. | — |
+| **HF SSB transceiver** | See verified models below. | — |
 
 ### Verified radio combinations
 
@@ -51,7 +51,7 @@ The merged binary is ~7 MB and includes the bootloader, partition table, applica
 ## First-boot setup
 
 After flashing, the T-Deck Plus boots into the **SETUP** screen automatically (it detects an unconfigured station and forces you through SETUP before showing HOME). You'll need:
-
+**Click ENTER to edit a field!**
 1. **Callsign** — your amateur-radio callsign (uppercased automatically). The default `NOCALL` is a placeholder you must replace.
 2. **Maidenhead grid** — your 4 or 6-character locator (e.g. `EN83` or `EN83IH`). Used in your heartbeat broadcasts and to compute distance to stations you hear.
 3. **Radio profile** — pick one from the table above (e.g. `digirig-rts-only` for a Baofeng).
