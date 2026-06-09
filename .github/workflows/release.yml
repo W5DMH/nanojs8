@@ -59,15 +59,15 @@ jobs:
           path: '.'
           command: |
             idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.release" build
-            idf.py merge-bin
+            idf.py merge-bin -o build/nanojs8-merged.bin
 
       - name: Locate merged binary
         id: bin
         run: |
-          # idf.py merge-bin writes to build/<project-name>-merged.bin
-          MERGED=$(ls build/*-merged.bin 2>/dev/null | head -1)
-          if [ -z "$MERGED" ]; then
-            echo "ERROR: merged bin not found in build/"
+          MERGED=build/nanojs8-merged.bin
+          if [ ! -f "$MERGED" ]; then
+            echo "ERROR: merged bin not found at $MERGED"
+            echo "build/ contents:"
             ls -la build/
             exit 1
           fi
