@@ -59,11 +59,13 @@ jobs:
           path: '.'
           command: |
             idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.release" build
-            idf.py merge-bin -o build/nanojs8-merged.bin
+            idf.py merge-bin -o nanojs8-merged.bin
 
       - name: Locate merged binary
         id: bin
         run: |
+          # idf.py merge-bin runs esptool with cwd=build/, so "-o nanojs8-merged.bin"
+          # lands the file at build/nanojs8-merged.bin (relative to project root).
           MERGED=build/nanojs8-merged.bin
           if [ ! -f "$MERGED" ]; then
             echo "ERROR: merged bin not found at $MERGED"
