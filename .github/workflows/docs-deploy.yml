@@ -1,0 +1,93 @@
+name: Deploy Docs
+
+# Auto-deploy the GitHub Pages site whenever something under docs/ changes
+# on main. This is the lightweight twin of release.yml — it doesn't rebuild
+# the firmware, it just refreshes the install page and republishes the
+# manifest pointing at the latest tagged release.
+#
+# Use this for:
+#   • Copy / styling tweaks to docs/index.html
+#   • README updates that you also want reflected on the install site
+#   • Manifest-format changes
+#
+# Don't use this when:
+#   • You actually have a new firmware build to ship — push a v* tag and
+#     let release.yml do the full firmware build + release + deploy.
+#
+# Can also be triggered manually from the Actions tab via "Run workflow".
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read     # gh release download needs read access to releases
+  pages: write       # to deploy GitHub Pages
+  id-token: write    # OIDC token for the Pages deployment
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+
+  deploy:
+    name: Deploy Pages
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Find latest release tag
+        id: latest_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          # `gh release view` with no args reads the latest published release
+          TAG=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName 2>/dev/null || true)
+          if [ -z "$TAG" ]; then
+            echo "::warning::No release found. Manifest will show 'unreleased' and Install button will fail until a v* tag is pushed."
+            echo "tag=unreleased"   >> $GITHUB_OUTPUT
+            echo "has_release=false" >> $GITHUB_OUTPUT
+          else
+            echo "Latest release: $TAG"
+            echo "tag=$TAG"          >> $GITHUB_OUTPUT
+            echo "has_release=true"  >> $GITHUB_OUTPUT
+          fi
+
+      - name: Inject version into manifest
+        run: |
+          sed -i "s/__VERSION__/${{ steps.latest_release.outputs.tag }}/g" docs/manifest.json
+          echo "Manifest after substitution:"
+          cat docs/manifest.json
+
+      - name: Download merged firmware from latest release
+        if: steps.latest_release.outputs.has_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          # ESP Web Tools needs the merged bin at the same origin as the
+          # manifest (CORS), so we colocate it in docs/ for Pages serving.
+          gh release download "${{ steps.latest_release.outputs.tag }}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern 'nanojs8-merged.bin' \
+              --dir docs/
+          ls -la docs/nanojs8-merged.bin
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
