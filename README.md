@@ -219,7 +219,7 @@ Wrap indent is 3 chars past the direction marker so wrapped body lines clearly r
 
 ---
 
-### DIRECTED — filtered to messages for you
+### DIRECTED — filtered to messages for you and transmitted Directed messages from you (in red)
 
 ![DIRECTED screen](docs/screenshots/05-directed.jpg)
 
